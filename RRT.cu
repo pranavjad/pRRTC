@@ -639,8 +639,11 @@ __global__ void ompl::geometric::parallelRRT(curandState* states, double * start
             }
         }
 
+        // At this point we have an edge to check between (x,y,z) <=> (nearx, neary, nearz)
+
+
         // check and add motion
-        if (validState(x, y, z) && checkMotion(x, y, z, nearx, neary, nearz) && nearestDist> distThreshold){
+        if (validState(x, y, z) && checkMotion(x, y, z, nearx, neary, nearz) && nearestDist > distThreshold){
 
             nodeCoordInd = atomicAdd(nextAvailPos, 1);
             nodeCoord[nodeCoordInd*dimension]=x;
@@ -893,24 +896,13 @@ ompl::base::PlannerStatus ompl::geometric::RRT::solve(const base::PlannerTermina
     cudaMemcpy(d_goalCoord, goalCoord.data(), sizeof(double) * dimension, cudaMemcpyHostToDevice);
     cudaMemcpy(d_startCoord, startCoord.data(), sizeof(double) * dimension, cudaMemcpyHostToDevice);
     
-    // initialize collision checker
-    // int numberOfObstacles=1;
-    // double obstacles[100]={0, 0, 0, 149.99}; // structured as [x1, y1, z1, r1, x2, y2, z2, r2...]
-    // double robotRadius=0;
-    // double *device_obstacles;
-    // size_t sizeOfObstacles = sizeof(double) * numberOfObstacles;
-    // cudaMalloc(device_obstacles, sizeOfObstacles);
-    // cudaMemcpy(device_obstacles, obstacles, sizeOfObstacles, cudaMemcpyHostToDevice);
-    
-    // // buffer for configurations to be checked by extra threads
-    // double *device_configs;
-    // cudaMalloc(device_configs, sizeof(double) * 3 * 100);
-    // bool *cc_result;
-    // cudaMalloc(cc_result, sizeof(bool));
+    // RRT loop in CPU
+
 
     
-    initCurandStates<<<numberOfBlock, threadPerBlock>>>(d_states);
-    cudaDeviceSynchronize();
+    // initCurandStates<<<numberOfBlock, threadPerBlock>>>(d_states);
+    // cudaDeviceSynchronize();
+    
     parallelRRT<<<numberOfBlock, threadPerBlock>>>(d_states, d_startCoord, d_goalCoord, lowBoundx, lowBoundy, lowBoundz, highBoundx, highBoundy, highBoundz, d_node_coord, maxDistance_, d_parent, d_children, d_terminate, d_path, d_nextAvailPos, dimension, device_obstacles, numberOfObstacles, robotRadius, device_configs, cc_result);
 
     cudaDeviceSynchronize();
