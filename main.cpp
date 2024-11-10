@@ -5,7 +5,9 @@
 #include <iostream>
 
 
-
+/*
+    Testing script for the gpu_collision_checker class
+*/
 int main() {
     std::mt19937 gen(0);
     std::uniform_real_distribution<float> center_dist(0.0, 1.0);

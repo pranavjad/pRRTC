@@ -133,81 +133,6 @@ __device__ bool ompl::geometric::checkMotion(double x1, double y1, double z1, do
 }
 
 
-// load configuration buffer with the steps for the edge
-__device__ bool ompl::geometric::loadConfigBuffer(double x1, double y1, double z1, double x2, double y2, double z2, long resolution, volatile double *configs){
-    double dx = (x2 - x1) / resolution;
-    double dy = (y2 - y1) / resolution;
-    double dz = (z2 - z1) / resolution;
-    for (int i = 0; i < resolution; i++) {
-        configs[i * 3] = x1;
-        configs[i * 3 + 1] = y1;
-        configs[i * 3 + 2] = z1;
-        x1 += dx;
-        y1 += dy;
-        z1 += dz;
-    }
-}
-
-__device__ inline constexpr auto sphere_sphere_sql2(
-    const float ax,
-    const float ay,
-    const float az,
-    const float ar,
-    const float bx,
-    const float by,
-    const float bz,
-    const float br) -> float
-{
-    const auto dx = ax - bx;
-    const auto dy = ay - by;
-    const auto dz = az - bz;
-    const auto rsq = ar + br;
-    return dot3(dx, dy, dz, dx, dy, dz) - rsq * rsq;
-}
-
-__device__ inline constexpr auto sphere_sphere_sql2(
-    const float ax,
-    const float ay,
-    const float az,
-    const float ar,
-    const float bx,
-    const float by,
-    const float bz,
-    const float br) -> float
-{
-    return sphere_sphere_sql2(ax, ay, az, ar, bx, by, bz, br);
-}
-
-__device__ inline bool sphere_environment_in_collision(
-    float sx_,
-    float sy_,
-    float sz_,
-    float sr_,
-    int numberOfobstacles
-)
-{
-    for (unsigned int i = 0; i < numberOfObstacles; i++)
-    {
-
-        if (sphere_sphere_sql2(obstacles[i * 4], obstacles[i * 4 + 1], obstacles[i * 4 + 2], obstacles[i * 4 + 3],  sx_, sy_, sz_, sr_) < 0)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-__device__ bool ompl::geometric::checkMotionParallel(int id, int robotRadius, int numberOfObstacles, bool *result) {
-    auto x = configurations[id * 3];
-    auto y = configurations[id * 3 + 1];
-    auto z = configurations[id * 3 + 2];
-    // *result |= sphere_environment_in_collision(x, y, z, robotRadius, numberOfObstacles);
-    atomicAdd(result, sphere_environment_in_collision(x, y, z, robotRadius, numberOfObstacles));
-    __syncthreads()
-    // see if we can put all the threads for collision checking in the same block
-}
-
-
 
 
 
@@ -630,7 +555,6 @@ __global__ void ompl::geometric::parallelRRT(curandState* states, double * start
 
     double goal_bias=0.05;
     double distThreshold=3;
-    double quaternion[4];
     int tId = threadIdx.x + (blockIdx.x * blockDim.x);
     bool goal_can_sample;
     double x, y, z;
@@ -666,50 +590,26 @@ __global__ void ompl::geometric::parallelRRT(curandState* states, double * start
     
     __syncthreads();
 
-
+    // main RRT loop
     while (true){
 
         rounds++;
 
-
+        // sample a new configuration
         if (curand_uniform(&states[tId])<goal_bias){
 
             // goal sampling
             x=goalCoord[0];
             y=goalCoord[1];
             z=goalCoord[2];
-            /*
-            quaternion[0]=goalCoord[3];
-            quaternion[1]=goalCoord[4];
-            quaternion[2]=goalCoord[5];
-            quaternion[3]=goalCoord[6];
-            */
-
         }
-        else{
-
-            /*
-            // sampling quaternion for SO3 space
-            double x0 = curand_uniform(&states[tId]); 
-            double r1 = sqrt(1.0 - x0), r2 = sqrt(x0);
-            double t1 = 2.0 * 3.14159 * curand_uniform(&states[tId]),
-                t2 = 2.0 * 3.14159 * curand_uniform(&states[tId]);
-            double c1 = cos(t1), s1 = sin(t1);
-            double c2 = cos(t2), s2 = sin(t2);
-            quaternion[0] = s1 * r1;
-            quaternion[1] = c1 * r1;
-            quaternion[2] = s2 * r2;
-            quaternion[3] = c2 * r2;
-            */
-
+        else {
             // sampling x,y,z for 3-D vector space
             x=(highBoundx-lowBoundx)*curand_uniform_double(&states[tId])+lowBoundx;
             y=(highBoundy-lowBoundy)*curand_uniform_double(&states[tId])+lowBoundy;
             z=(highBoundz-lowBoundz)*curand_uniform_double(&states[tId])+lowBoundz;
-
-
         }
-        
+
         double nearestDist=1e10;
         int nearNodeInd=-1;
         double nearx;
@@ -717,13 +617,11 @@ __global__ void ompl::geometric::parallelRRT(curandState* states, double * start
         double nearz;
 
         if (validState(x, y, z)){
-
             // find nearest neighbor
             for (int i=0;i<(*nextAvailPos)*dimension; i+=dimension){
                 if (nodeCoord[i]==-1){
                     continue;
                 }
-                
                 double nodex=nodeCoord[i];
                 double nodey=nodeCoord[i+1];
                 double nodez=nodeCoord[i+2];
@@ -738,23 +636,8 @@ __global__ void ompl::geometric::parallelRRT(curandState* states, double * start
                 if ( (i/dimension)%100==0 && *terminate==1){
                     return;
                 }
-                
             }
         }
-
-        
-
-
-        /*
-        // interpolate
-        if (nearestDist>maxDistance){
-            x=nearx+(x-nearx)*(maxDistance/nearestDist);
-            y=neary+(y-neary)*(maxDistance/nearestDist);
-            z=nearz+(z-nearz)*(maxDistance/nearestDist);
-            nearestDist=maxDistance;
-        }
-        */
-
 
         // check and add motion
         if (validState(x, y, z) && checkMotion(x, y, z, nearx, neary, nearz) && nearestDist> distThreshold){
@@ -763,12 +646,7 @@ __global__ void ompl::geometric::parallelRRT(curandState* states, double * start
             nodeCoord[nodeCoordInd*dimension]=x;
             nodeCoord[nodeCoordInd*dimension+1]=y;
             nodeCoord[nodeCoordInd*dimension+2]=z;
-            /*
-            nodeCoord[nodeCoordInd*7+3]=quaternion[0];
-            nodeCoord[nodeCoordInd*7+4]=quaternion[1];
-            nodeCoord[nodeCoordInd*7+5]=quaternion[2];
-            nodeCoord[nodeCoordInd*7+6]=quaternion[3];
-            */
+            
             parent[nodeCoordInd] = nearNodeInd;
 
             for (int t=0;t<100;t++){
@@ -1016,20 +894,19 @@ ompl::base::PlannerStatus ompl::geometric::RRT::solve(const base::PlannerTermina
     cudaMemcpy(d_startCoord, startCoord.data(), sizeof(double) * dimension, cudaMemcpyHostToDevice);
     
     // initialize collision checker
-    // gpu_collision_checker cc()
-    int numberOfObstacles=1;
-    double obstacles[100]={0, 0, 0, 149.99}; // structured as [x1, y1, z1, r1, x2, y2, z2, r2...]
-    double robotRadius=0;
-    double *device_obstacles;
-    size_t sizeOfObstacles = sizeof(double) * numberOfObstacles;
-    cudaMalloc(device_obstacles, sizeOfObstacles);
-    cudaMemcpy(device_obstacles, obstacles, sizeOfObstacles, cudaMemcpyHostToDevice);
+    // int numberOfObstacles=1;
+    // double obstacles[100]={0, 0, 0, 149.99}; // structured as [x1, y1, z1, r1, x2, y2, z2, r2...]
+    // double robotRadius=0;
+    // double *device_obstacles;
+    // size_t sizeOfObstacles = sizeof(double) * numberOfObstacles;
+    // cudaMalloc(device_obstacles, sizeOfObstacles);
+    // cudaMemcpy(device_obstacles, obstacles, sizeOfObstacles, cudaMemcpyHostToDevice);
     
-    // buffer for configurations to be checked by extra threads
-    double *device_configs;
-    cudaMalloc(device_configs, sizeof(double) * 3 * 100);
-    bool *cc_result;
-    cudaMalloc(cc_result, sizeof(bool));
+    // // buffer for configurations to be checked by extra threads
+    // double *device_configs;
+    // cudaMalloc(device_configs, sizeof(double) * 3 * 100);
+    // bool *cc_result;
+    // cudaMalloc(cc_result, sizeof(bool));
 
     
     initCurandStates<<<numberOfBlock, threadPerBlock>>>(d_states);
