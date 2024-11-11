@@ -5,6 +5,9 @@
 
 __device__ int atomic_free_index;
 __device__ bool reached_goal;
+const int MAX_SAMPLES = 1000;
+const int MAX_ITERS = 1000;
+const int COORD_BOUND = 100;
 
 /* Collision Checking functions */
 __device__ inline constexpr auto dot3(
@@ -81,9 +84,6 @@ __global__ void validate_edges(float *new_configs, int *new_config_parents, bool
 /* End of collision checking stuff */
 
 
-const int MAX_SAMPLES = 1000;
-const int MAX_ITERS = 1000;
-
 // initialize cuda random
 __global__ void init_rng(curandState* states, unsigned long seed) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -119,7 +119,7 @@ __global__ void sample_edges(float *new_configs, int *new_config_parents, float 
     // otherwise sample a random config
     else {
         for (int i = 0; i < dim; i++) {
-            config[i] = curand_uniform(&local_rng_state);
+            config[i] = (2 * COORD_BOUND * curand_uniform(&local_rng_state)) - COORD_BOUND;
         }
         rng_states[tid] = local_rng_state;
     }
@@ -165,15 +165,12 @@ __global__ void grow_tree(float *new_configs, int *new_config_parents, bool *cc_
 }
 
 void solve(Configuration &start, Configuration &goal) {
-    std::vector<std::size_t> parents(MAX_SAMPLES);
-    std::vector<Configuration> nodes(MAX_SAMPLES);
     std::size_t iter = 0;
     std::size_t start_index = 0;
     std::size_t free_index = start_index + 1;
     NN tree;
 
     // add start to tree
-    nodes[start_index] = start;
     tree.insert(NNNode{start_index, start});
 
     // copy stuff to GPU
@@ -237,6 +234,30 @@ void solve(Configuration &start, Configuration &goal) {
         cudaMemcpyFromSymbol(&free_index, atomic_free_index, sizeof(int));
         cudaMemcpyFromSymbol(&done, &goal_reached, sizeof(bool));
         if (done) break;
+    }
+
+    // retrieve data from gpu
+    std::vector<int> h_parents;
+    std::vector<int> h_nodes;
+    cudaMemcpy(h_parents.data(), parents, MAX_SAMPlES * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_nodes.data(), nodes, MAX_SAMPLES * config_size, cudaMemcpyDeviceToHost);
+
+    std::vector<int> path;
+
+    if (done == true) {
+        std::cout << "Found Goal!" << std::endl;
+
+        // get parent at position 0 in new_config_parents, because that will be the parent of the goal
+        int parent_idx = -1;
+        cudaMemcpy(&parent_idx, new_config_parents, sizeof(int), cudaMemcpyDeviceToHost);
+        assert(parent_idx != -1);
+
+        while (parent_idx != h_parents[parent_idx]) {
+            path.emplace_back(parent_idx);
+            parent_idx = h_parents[parent_idx];
+        }
+        path.emplace_back(parent_idx);
+        std::reverse(path.begin(), path.end());
     }
 
 }
