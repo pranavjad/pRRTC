@@ -24,6 +24,11 @@ add_executable(runcc
     kernel.cu
 )
 
+add_executable(test_rrt
+    test_rrt.cpp
+    RRT1.cu
+)
+
 target_include_directories(runcc
     PRIVATE
     {$CMAKE_CURRENT_SOURCE_DIR}
