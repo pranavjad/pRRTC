@@ -19,17 +19,12 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-add_executable(runcc
-    main.cpp
-    kernel.cu
-)
-
 add_executable(test_rrt
     test_rrt.cpp
-    RRT1.cu
+    RRT_interleaved.cu
 )
 
-target_include_directories(runcc
+target_include_directories(test_rrt
     PRIVATE
     {$CMAKE_CURRENT_SOURCE_DIR}
 )

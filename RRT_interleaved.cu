@@ -1,4 +1,4 @@
-#include "RRT1.h"
+#include "RRT_interleaved.h"
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -7,6 +7,11 @@
 #include <iostream>
 #include <cassert>
 #include <algorithm>
+
+/*
+Parallelized RRT with parallelized collision checking.
+Interleaved strategy: sample states in parallel, then check edges in parallel, then repeat.
+*/
 
 __device__ int atomic_free_index;
 __device__ bool reached_goal = false;

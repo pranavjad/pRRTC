@@ -1,4 +1,4 @@
-#include "RRT1.h"
+#include "RRT_interleaved.h"
 
 int main() {
     std::vector<float> obstacles = {
