@@ -44,6 +44,6 @@ void panda_test() {
 
 int main() {
     // sphere_test();
-    // panda_test();
+    panda_test();
 }
 

@@ -20,6 +20,8 @@ __device__ bool reached_goal = false;
 const int MAX_SAMPLES = 1000000;
 const int MAX_ITERS = 1000000;
 const int COORD_BOUND = 2.0;
+const int NUM_NEW_CONFIGS = 1024;
+const int GRANULARITY = 1024;
 const float RRT_RADIUS = 1.0;
 
 
@@ -186,24 +188,23 @@ void solve(typename Robot::Configuration &start, typename Robot::Configuration &
     cudaMemcpy(parents, &start_index, sizeof(int), cudaMemcpyHostToDevice);
 
     // create a curandState for each thread -> holds state of RNG for each thread seperately
-    // For growing the tree we will create num_new_configs threads
-    const int num_new_configs = 10;
+    // For growing the tree we will create NUM_NEW_CONFIGS threads
     curandState *rng_states;
-    cudaMalloc(&rng_states, num_new_configs * sizeof(curandState));
+    cudaMalloc(&rng_states, NUM_NEW_CONFIGS * sizeof(curandState));
     int blockSize = 256;
-    int numBlocks = (num_new_configs + blockSize - 1) / blockSize;
+    int numBlocks = (NUM_NEW_CONFIGS + blockSize - 1) / blockSize;
     init_rng<<<numBlocks, blockSize>>>(rng_states, 0);
 
     // create arrays on the gpu to hold the newly sampled configs, and their parents
     float *new_configs;
-    cudaMalloc(&new_configs, num_new_configs * config_size);
+    cudaMalloc(&new_configs, NUM_NEW_CONFIGS * config_size);
     int *new_config_parents;
-    cudaMalloc(&new_config_parents, num_new_configs * sizeof(int));
+    cudaMalloc(&new_config_parents, NUM_NEW_CONFIGS * sizeof(int));
 
     // create an array to hold the result of collision check for each new edge
     bool *cc_result;
-    cudaMalloc(&cc_result, num_new_configs * sizeof(bool));
-    cudaMemset(cc_result, 0, num_new_configs);
+    cudaMalloc(&cc_result, NUM_NEW_CONFIGS * sizeof(bool));
+    cudaMemset(cc_result, 0, NUM_NEW_CONFIGS);
     int *num_colliding_edges;
     cudaMalloc(&num_colliding_edges, sizeof(int));
 
@@ -219,20 +220,19 @@ void solve(typename Robot::Configuration &start, typename Robot::Configuration &
     cudaMemcpy(obstacles, h_obstacles.data(), obstacles_size, cudaMemcpyHostToDevice);
 
 
-    const int granularity = 32;
     bool done = false;
     // main RRT loop
     while (iter++ < MAX_ITERS && free_index < MAX_SAMPLES) {
         std::cout << iter << std::endl;
         // sample configurations and get edges to be checked
-        sample_edges<Robot><<<numBlocks, blockSize>>>(new_configs, new_config_parents, nodes, goal_config, rng_states, num_new_configs);
+        sample_edges<Robot><<<numBlocks, blockSize>>>(new_configs, new_config_parents, nodes, goal_config, rng_states, NUM_NEW_CONFIGS);
 
         // collision check all the edges
-        cudaMemset(cc_result, 0, num_new_configs);
-        validate_edges<Robot><<<num_new_configs, granularity>>>(new_configs, new_config_parents, cc_result, num_colliding_edges, obstacles, nodes, num_obstacles, granularity, num_new_configs);
+        cudaMemset(cc_result, 0, NUM_NEW_CONFIGS);
+        validate_edges<Robot><<<NUM_NEW_CONFIGS, GRANULARITY>>>(new_configs, new_config_parents, cc_result, num_colliding_edges, obstacles, nodes, num_obstacles, GRANULARITY, NUM_NEW_CONFIGS);
 
         // add all the new edges to the tree
-        grow_tree<Robot><<<numBlocks, blockSize>>>(new_configs, new_config_parents, cc_result, nodes, parents, num_colliding_edges, goal_config, num_new_configs);
+        grow_tree<Robot><<<numBlocks, blockSize>>>(new_configs, new_config_parents, cc_result, nodes, parents, num_colliding_edges, goal_config, NUM_NEW_CONFIGS);
 
         // update free index
         cudaMemcpyFromSymbol(&free_index, atomic_free_index, sizeof(int), 0, cudaMemcpyDeviceToHost);
