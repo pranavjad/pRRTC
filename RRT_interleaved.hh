@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 
-using Configuration = std::vector<float>;
+using Configuration = std::array<float>;
 
 /* nearest neighbors stuff */
 // using Metric = nigh::LPMetric<2>;
@@ -28,7 +28,7 @@ using Configuration = std::vector<float>;
 // >;
 /* end nearest neighbors stuff */
 
-template <int dim>
-void solve(Configuration &start, Configuration &goal, std::vector<float> &obstacles);
+template <typename Robot>
+void solve(Robot::Configuration &start, Robot::Configuration &goal, std::vector<float> &obstacles);
 
-extern template void solve<3>(std::vector<float>&, std::vector<float>&, std::vector<float>&);
+extern template void solve<3>(std::array<float>&, std::array<float>&, std::vector<float>&);
