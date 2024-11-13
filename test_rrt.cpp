@@ -12,9 +12,9 @@ void sphere_test() {
     };
 
     robots::Sphere::Configuration start = {0.1, 0.2, 0.1};
-    robots::Sphere::Configuration goal = {10.0, 10.0, 10.0};
+    std::vector<robots::Sphere::Configuration> goals = {{10.0, 10.0, 10.0}};
 
-    solve<robots::Sphere>(start, goal, obstacles);
+    solve<robots::Sphere>(start, goals, obstacles);
 }
 
 void panda_test() {
@@ -37,9 +37,9 @@ void panda_test() {
     };
 
     robots::Panda::Configuration start = {0., -0.785, 0., -2.356, 0., 1.571, 0.785};
-    robots::Panda::Configuration goal = {2.35, 1., 0., -0.8, 0, 2.5, 0.785};
+    std::vector<robots::Panda::Configuration> goals = {{2.35, 1., 0., -0.8, 0, 2.5, 0.785}};
 
-    solve<robots::Panda>(start, goal, obstacles);
+    solve<robots::Panda>(start, goals, obstacles);
 }
 
 int main() {

@@ -17,6 +17,8 @@ Interleaved strategy: sample states in parallel, then check edges in parallel, t
 
 __device__ int atomic_free_index;
 __device__ bool reached_goal = false;
+__device__ int found_goal_idx;
+
 const int MAX_SAMPLES = 1000000;
 const int MAX_ITERS = 1000000;
 const int COORD_BOUND = 2.0;
@@ -76,7 +78,7 @@ __global__ void init_rng(curandState* states, unsigned long seed) {
 // each thread is responsible for finding a new edge to check
 // sample a new state -> connect it to nearest neighbor in our tree
 template <typename Robot>
-__global__ void sample_edges(float *new_configs, int *new_config_parents, float *nodes, float *goal_config, curandState *rng_states, int num_samples) {
+__global__ void sample_edges(float *new_configs, int *new_config_parents, float *nodes, float *goal_configs, int num_goals, curandState *rng_states, int num_samples) {
     static constexpr auto dim = Robot::dimension;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= num_samples) return;
@@ -84,8 +86,10 @@ __global__ void sample_edges(float *new_configs, int *new_config_parents, float 
 
     float *config = &new_configs[tid * dim];
 
-    // if this is the first thread always sample the goal
+    // if this is the first thread always sample a random goal
     if (tid == 0) {
+        int goal_idx = (int)(num_goals * curand_uniform(&local_rng_state));
+        float *goal_config = goal_configs + (dim * sizeof(float) * goal_idx);
         for (int i = 0; i < dim; i++) {
             config[i] = goal_config[i];
         }
@@ -133,7 +137,7 @@ __global__ void sample_edges(float *new_configs, int *new_config_parents, float 
 // grow the RRT tree after we figure out what edges have no collisions
 // each thread is responsible for adding one edge to the tree
 template <typename Robot>
-__global__ void grow_tree(float *new_configs, int *new_config_parents, bool *cc_result, float *nodes, int *parents, int *num_colliding_edges, float *goal_config, int num_samples) {
+__global__ void grow_tree(float *new_configs, int *new_config_parents, bool *cc_result, float *nodes, int *parents, int *num_colliding_edges, float *goal_configs, int num_goals, int num_samples) {
     static constexpr auto dim = Robot::dimension;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= num_samples) return;
@@ -141,10 +145,14 @@ __global__ void grow_tree(float *new_configs, int *new_config_parents, bool *cc_
     // printf("growing tree!\n");
     // The first edge is always to the goal so if we get here, we need to check if we reached the goal.
     if (tid == 0) {
-        float dist_to_goal = utils::l2_dist(new_configs, goal_config, dim);
-        if (dist_to_goal < 0.001) {
-            reached_goal = true;
-            return;
+        int goal_size = dim * sizeof(float);
+        for (int i = 0; i < num_goals; i++) {
+            float dist_to_goal = utils::l2_dist(new_configs, &goal_configs[i * goal_size], dim);
+            if (dist_to_goal < 0.001) {
+                reached_goal = true;
+                found_goal_idx = i;
+                return;
+            }
         }
     }
 
@@ -161,7 +169,7 @@ __global__ void grow_tree(float *new_configs, int *new_config_parents, bool *cc_
 }
 
 template <typename Robot>
-void solve(typename Robot::Configuration &start, typename Robot::Configuration &goal, std::vector<float> &h_obstacles) {
+void solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, std::vector<float> &h_obstacles) {
     static constexpr auto dim = Robot::dimension;
     std::size_t iter = 0;
     std::size_t start_index = 0;
@@ -173,16 +181,17 @@ void solve(typename Robot::Configuration &start, typename Robot::Configuration &
     // constexpr int dim = DIM; 
 
     float *start_config;
-    float *goal_config;
+    float *goal_configs;
+    int num_goals = goals.size();
     float *nodes;
     int *parents;
     const std::size_t config_size = dim * sizeof(float);
     cudaMalloc(&start_config, config_size);
-    cudaMalloc(&goal_config, config_size);
+    cudaMalloc(&goal_configs, config_size * num_goals);
     cudaMalloc(&nodes, MAX_SAMPLES * config_size);
     cudaMalloc(&parents, MAX_SAMPLES * sizeof(int));
     cudaMemcpy(start_config, start.data(), config_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(goal_config, goal.data(), config_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(goal_configs, goals.data(), config_size, cudaMemcpyHostToDevice);
     // add the start config to the tree, and set the start to be it's own parent.
     cudaMemcpy(nodes, start.data(), config_size, cudaMemcpyHostToDevice);
     cudaMemcpy(parents, &start_index, sizeof(int), cudaMemcpyHostToDevice);
@@ -225,14 +234,14 @@ void solve(typename Robot::Configuration &start, typename Robot::Configuration &
     while (iter++ < MAX_ITERS && free_index < MAX_SAMPLES) {
         std::cout << iter << std::endl;
         // sample configurations and get edges to be checked
-        sample_edges<Robot><<<numBlocks, blockSize>>>(new_configs, new_config_parents, nodes, goal_config, rng_states, NUM_NEW_CONFIGS);
+        sample_edges<Robot><<<numBlocks, blockSize>>>(new_configs, new_config_parents, nodes, goal_configs, num_goals, rng_states, NUM_NEW_CONFIGS);
 
         // collision check all the edges
         cudaMemset(cc_result, 0, NUM_NEW_CONFIGS);
         validate_edges<Robot><<<NUM_NEW_CONFIGS, GRANULARITY>>>(new_configs, new_config_parents, cc_result, num_colliding_edges, obstacles, nodes, num_obstacles, GRANULARITY, NUM_NEW_CONFIGS);
 
         // add all the new edges to the tree
-        grow_tree<Robot><<<numBlocks, blockSize>>>(new_configs, new_config_parents, cc_result, nodes, parents, num_colliding_edges, goal_config, NUM_NEW_CONFIGS);
+        grow_tree<Robot><<<numBlocks, blockSize>>>(new_configs, new_config_parents, cc_result, nodes, parents, num_colliding_edges, goal_configs, num_goals, NUM_NEW_CONFIGS);
 
         // update free index
         cudaMemcpyFromSymbol(&free_index, atomic_free_index, sizeof(int), 0, cudaMemcpyDeviceToHost);
@@ -266,7 +275,7 @@ void solve(typename Robot::Configuration &start, typename Robot::Configuration &
     }
 
     cudaFree(start_config);
-    cudaFree(goal_config);
+    cudaFree(goal_configs);
     cudaFree(nodes);
     cudaFree(parents);
     cudaFree(rng_states);
@@ -277,5 +286,5 @@ void solve(typename Robot::Configuration &start, typename Robot::Configuration &
     cudaFree(obstacles);
 }
 
-template void solve<ppln::robots::Sphere>(std::array<float, 3>&, std::array<float, 3>&, std::vector<float>&);
-template void solve<ppln::robots::Panda>(std::array<float, 7>&, std::array<float, 7>&, std::vector<float>&);
+template void solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, std::vector<float>&);
+template void solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, std::vector<float>&);
