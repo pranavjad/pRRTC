@@ -14,6 +14,7 @@ namespace ppln::robots {
     {
         static constexpr auto name = "sphere";
         static constexpr auto dimension = 3;
+        static constexpr float radius = 1.0;
         using Configuration = std::array<float, dimension>;
     };
 }

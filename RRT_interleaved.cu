@@ -1,5 +1,6 @@
 #include "RRT_interleaved.hh"
 #include "Robots.hh"
+#include "collision_backends.cu"
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -21,71 +22,13 @@ const int MAX_ITERS = 10000;
 const int COORD_BOUND = 50;
 const float RRT_RADIUS = 5.0;
 
-/* Collision Checking functions */
-__device__ inline constexpr auto dot3(
-    const float ax,
-    const float ay,
-    const float az,
-    const float bx,
-    const float by,
-    const float bz) -> float
-{
-    return ax * bx + ay * by + az * bz;
-}
 
-__device__ inline constexpr auto sphere_sphere_sql2(
-    const float ax,
-    const float ay,
-    const float az,
-    const float ar,
-    const float bx,
-    const float by,
-    const float bz,
-    const float br) -> float
-{
-    const auto dx = ax - bx;
-    const auto dy = ay - by;
-    const auto dz = az - bz;
-    const auto rsq = ar + br;
-    return dot3(dx, dy, dz, dx, dy, dz) - rsq * rsq;
-}
-
-// returns squared l2 distance between two configs
-__device__ float l2_dist(float *config_a, float *config_b, const int dim) {
-    float ans = 0;
-    float diff;
-    for (int i = 0; i < dim; i++) {
-        diff = config_a[i] - config_b[i];
-        ans += diff * diff;
-    }
-    return sqrt(ans);
-}
-
-// assuming obstacles is a num_obstacles x 4 array holding x,y,z,r values
-// returns true if there is a collision, otherwise false
-__device__ bool sphere_robot_cc_backend(float *config, float *obstacles, int num_obstacles, float robot_radius) {
-    for (int i = 0; i < num_obstacles; i++) {
-        float obs_x = obstacles[i * 4];
-        float obs_y = obstacles[i * 4 + 1];
-        float obs_z = obstacles[i * 4 + 2];
-        float obs_r = obstacles[i * 4 + 3];
-        if (sphere_sphere_sql2(config[0], config[1], config[2], robot_radius, obs_x, obs_y, obs_z, obs_r) < 0)
-        {
-            // printf("colliding obstacle idx: %d\n", i);
-            // printf("colliding obstacle: %f, %f, %f, %f\n", obs_x, obs_y, obs_z, obs_r);
-            // printf("colliding config: %f, %f, %f\n", config[0], config[1], config[2]);
-            return true;
-        }
-    }
-    return false;
-}
 __device__ inline void print_config(float *config, int dim) {
     for (int i = 0; i < dim; i++) {
         printf("%f ", config[i]);
     }
     printf("\n");
 }
-
 
 // granularity = number of interpolated points to check along each edge
 // total number of threads we need is edges * granularity
@@ -95,17 +38,15 @@ __global__ void validate_edges(float *new_configs, int *new_config_parents, bool
     static constexpr auto dim = Robot::dimension;
     int tid_in_block = threadIdx.x;
     int bid = blockIdx.x;
-    int total_threads = num_samples * granularity;
+    // total_threads = num_samples * granularity;
     if (bid >= num_samples) return;
     if (tid_in_block >= granularity) return;
-    // printf("parent idx: %d\n", new_config_parents[bid]);
+
     float *edge_start = &nodes[new_config_parents[bid] * dim];
     float *edge_end = &new_configs[bid * dim];
-    float len = l2_dist(edge_start, edge_end, dim);
+    float len = utils::l2_dist(edge_start, edge_end, dim);
 
-    // print_config(edge_start, dim);
-    // print_config(edge_end, dim);
-    // printf("len: %f\n", len);
+
     float delta = len / (float) granularity;
 
     // calculate the configuration this thread will be checking
@@ -115,14 +56,13 @@ __global__ void validate_edges(float *new_configs, int *new_config_parents, bool
     }
 
     // check for collision
-    bool config_in_collision = sphere_robot_cc_backend(config, obstacles, num_obstacles, 1.0);
+    bool config_in_collision = collision::fkcc<Robot>(config, obstacles, num_obstacles);
     if (cc_result[bid] == false && config_in_collision) {
         atomicAdd(num_colliding_edges, 1);
         // printf("collision: %d\n", num_colliding_edges);
     }
     cc_result[bid] |= config_in_collision;
 }
-/* End of collision checking stuff */
 
 
 // initialize cuda random
@@ -162,7 +102,7 @@ __global__ void sample_edges(float *new_configs, int *new_config_parents, float 
     float min_dist = 1000000000.0;
     int nearest_idx = -1;
     for (int i = 0; i < atomic_free_index; i++) {
-        float dist = l2_dist(&nodes[i * dim], config, dim);
+        float dist = utils::l2_dist(&nodes[i * dim], config, dim);
         if (dist < min_dist) {
             nearest_idx = i;
             min_dist = dist;
@@ -199,7 +139,7 @@ __global__ void grow_tree(float *new_configs, int *new_config_parents, bool *cc_
     // printf("growing tree!\n");
     // The first edge is always to the goal so if we get here, we need to check if we reached the goal.
     if (tid == 0) {
-        float dist_to_goal = l2_dist(new_configs, goal_config, dim);
+        float dist_to_goal = utils::l2_dist(new_configs, goal_config, dim);
         if (dist_to_goal < 0.001) {
             reached_goal = true;
             return;
@@ -224,10 +164,6 @@ void solve(typename Robot::Configuration &start, typename Robot::Configuration &
     std::size_t iter = 0;
     std::size_t start_index = 0;
     std::size_t free_index = start_index + 1;
-    // NN tree;
-
-    // add start to tree
-    // tree.clinsert(NNNode{start_index, start});
 
     // copy stuff to GPU
     // GPU needs: start, goal, tree, parents, nodes
