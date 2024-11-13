@@ -219,7 +219,7 @@ __global__ void grow_tree(float *new_configs, int *new_config_parents, bool *cc_
 }
 
 template <typename Robot>
-void solve(Robot::Configuration &start, Robot::Configuration &goal, std::vector<float> &h_obstacles) {
+void solve(typename Robot::Configuration &start, typename Robot::Configuration &goal, std::vector<float> &h_obstacles) {
     static constexpr auto dim = Robot::dimension;
     std::size_t iter = 0;
     std::size_t start_index = 0;
@@ -341,4 +341,4 @@ void solve(Robot::Configuration &start, Robot::Configuration &goal, std::vector<
     cudaFree(obstacles);
 }
 
-template void solve<ppln::robots::Sphere>(std::vector<float>&, std::vector<float>&, std::vector<float>&);
+template void solve<ppln::robots::Sphere>(std::array<float, 3>&, std::array<float, 3>&, std::vector<float>&);
