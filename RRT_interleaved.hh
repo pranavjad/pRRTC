@@ -35,3 +35,4 @@ template <typename Robot>
 void solve(typename Robot::Configuration &start, typename Robot::Configuration &goal, std::vector<float> &obstacles);
 
 extern template void solve<ppln::robots::Sphere>(std::array<float, 3>&, std::array<float, 3>&, std::vector<float>&);
+extern template void solve<ppln::robots::Panda>(std::array<float, 7>&, std::array<float, 7>&, std::vector<float>&);

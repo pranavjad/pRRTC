@@ -69,7 +69,9 @@ namespace utils {
 /* Collision checking backend implementations for different robots */
 namespace collision {
     using namespace utils;
-
+    
+    // fkcc -> checks if the config is "good"
+    // returns true if the config does collide with an obstacle, returns false if the config does not collide
     template <typename Robot>
     __device__ bool fkcc(float *config, float *obstacles, int num_obstacles);
 
@@ -77,7 +79,7 @@ namespace collision {
     template <>
     __device__ bool fkcc<ppln::robots::Sphere>(float *config, float *obstacles, int num_obstacles)
     {
-        return sphere_environment_in_collision(obstacles, num_obstacles, config[0], config[1], config[2], ppln::robots::Sphere::radius);
+        return not sphere_environment_in_collision(obstacles, num_obstacles, config[0], config[1], config[2], ppln::robots::Sphere::radius);
     }
 
     template <>

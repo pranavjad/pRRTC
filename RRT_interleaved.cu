@@ -17,10 +17,10 @@ Interleaved strategy: sample states in parallel, then check edges in parallel, t
 
 __device__ int atomic_free_index;
 __device__ bool reached_goal = false;
-const int MAX_SAMPLES = 10000;
-const int MAX_ITERS = 10000;
-const int COORD_BOUND = 50;
-const float RRT_RADIUS = 5.0;
+const int MAX_SAMPLES = 1000000;
+const int MAX_ITERS = 1000000;
+const int COORD_BOUND = 2.0;
+const float RRT_RADIUS = 1.0;
 
 
 __device__ inline void print_config(float *config, int dim) {
@@ -56,7 +56,7 @@ __global__ void validate_edges(float *new_configs, int *new_config_parents, bool
     }
 
     // check for collision
-    bool config_in_collision = collision::fkcc<Robot>(config, obstacles, num_obstacles);
+    bool config_in_collision = not collision::fkcc<Robot>(config, obstacles, num_obstacles);
     if (cc_result[bid] == false && config_in_collision) {
         atomicAdd(num_colliding_edges, 1);
         // printf("collision: %d\n", num_colliding_edges);
@@ -278,3 +278,4 @@ void solve(typename Robot::Configuration &start, typename Robot::Configuration &
 }
 
 template void solve<ppln::robots::Sphere>(std::array<float, 3>&, std::array<float, 3>&, std::vector<float>&);
+template void solve<ppln::robots::Panda>(std::array<float, 7>&, std::array<float, 7>&, std::vector<float>&);
