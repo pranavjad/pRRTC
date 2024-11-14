@@ -1,6 +1,7 @@
 #include "RRT_interleaved.hh"
 #include "Robots.hh"
 #include "collision_backends.cu"
+#include "collision/environment.hh"
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -38,7 +39,7 @@ __device__ inline void print_config(float *config, int dim) {
 // total number of threads we need is edges * granularity
 // Each block is of size granularity and it checks one edge. Each thread in the block checks a consecutive interpolated point along the edge.
 template <typename Robot>
-__global__ void validate_edges(float *new_configs, int *new_config_parents, bool *cc_result, int *num_colliding_edges, float *obstacles, float *nodes, int num_obstacles, int granularity, int num_samples) {
+__global__ void validate_edges(float *new_configs, int *new_config_parents, bool *cc_result, int *num_colliding_edges, ppln::collision::Environment<float> *env, float *nodes, int granularity, int num_samples) {
     static constexpr auto dim = Robot::dimension;
     int tid_in_block = threadIdx.x;
     int bid = blockIdx.x;
@@ -48,7 +49,7 @@ __global__ void validate_edges(float *new_configs, int *new_config_parents, bool
 
     float *edge_start = &nodes[new_config_parents[bid] * dim];
     float *edge_end = &new_configs[bid * dim];
-    float len = utils::l2_dist(edge_start, edge_end, dim);
+    float len = device_utils::l2_dist(edge_start, edge_end, dim);
 
 
     float delta = len / (float) granularity;
@@ -60,11 +61,11 @@ __global__ void validate_edges(float *new_configs, int *new_config_parents, bool
     }
 
     // check for collision
-    bool config_in_collision = not collision::fkcc<Robot>(config, obstacles, num_obstacles);
-    if (cc_result[bid] == false && config_in_collision) {
-        atomicAdd(num_colliding_edges, 1);
-        // printf("collision: %d\n", num_colliding_edges);
-    }
+    bool config_in_collision = not ppln::collision::fkcc<Robot>(config, env);
+    // if (cc_result[bid] == false && config_in_collision) {
+    //     atomicAdd(num_colliding_edges, 1);
+    //     // printf("collision: %d\n", num_colliding_edges);
+    // }
     cc_result[bid] |= config_in_collision;
 }
 
@@ -108,7 +109,7 @@ __global__ void sample_edges(float *new_configs, int *new_config_parents, float 
     float min_dist = 1000000000.0;
     int nearest_idx = -1;
     for (int i = 0; i < atomic_free_index; i++) {
-        float dist = utils::l2_dist(&nodes[i * dim], config, dim);
+        float dist = device_utils::l2_dist(&nodes[i * dim], config, dim);
         if (dist < min_dist) {
             nearest_idx = i;
             min_dist = dist;
@@ -147,7 +148,7 @@ __global__ void grow_tree(float *new_configs, int *new_config_parents, bool *cc_
     if (tid == 0) {
         int goal_size = dim * sizeof(float);
         for (int i = 0; i < num_goals; i++) {
-            float dist_to_goal = utils::l2_dist(new_configs, &goal_configs[i * goal_size], dim);
+            float dist_to_goal = device_utils::l2_dist(new_configs, &goal_configs[i * goal_size], dim);
             if (dist_to_goal < 0.001) {
                 reached_goal = true;
                 found_goal_idx = i;
@@ -169,16 +170,16 @@ __global__ void grow_tree(float *new_configs, int *new_config_parents, bool *cc_
 }
 
 template <typename Robot>
-void solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, std::vector<float> &h_obstacles) {
+void solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &h_environment) {
     static constexpr auto dim = Robot::dimension;
     std::size_t iter = 0;
     std::size_t start_index = 0;
     std::size_t free_index = start_index + 1;
 
+    
+
     // copy stuff to GPU
     // GPU needs: start, goal, tree, parents, nodes
-    // const int dim = start.size();
-    // constexpr int dim = DIM; 
 
     float *start_config;
     float *goal_configs;
@@ -221,12 +222,14 @@ void solve(typename Robot::Configuration &start, std::vector<typename Robot::Con
     cudaMemcpyToSymbol(atomic_free_index, &free_index, sizeof(int));
 
     // allocate for obstacles
-    float *obstacles;
-    assert(h_obstacles.size() % 4 == 0);
-    int num_obstacles = h_obstacles.size() / 4;
-    std::size_t obstacles_size = h_obstacles.size() * sizeof(float);
-    cudaMalloc(&obstacles, obstacles_size);
-    cudaMemcpy(obstacles, h_obstacles.data(), obstacles_size, cudaMemcpyHostToDevice);
+    ppln::collision::Environment<float> *env;
+    cudaMalloc(&env, sizeof(env));
+    cudaMemcpy(env, &h_environment, sizeof(env), cudaMemcpyHostToDevice);
+    // float *obstacles;
+    // assert(h_environment.num_spheres.size() % 4 == 0);
+    // std::size_t obstacles_size = h_environment.num_spheres * sizeof(float);
+    // cudaMalloc(&obstacles, obstacles_size);
+    // cudaMemcpy(obstacles, h_environment.spheres, obstacles_size, cudaMemcpyHostToDevice);
 
 
     bool done = false;
@@ -238,7 +241,7 @@ void solve(typename Robot::Configuration &start, std::vector<typename Robot::Con
 
         // collision check all the edges
         cudaMemset(cc_result, 0, NUM_NEW_CONFIGS);
-        validate_edges<Robot><<<NUM_NEW_CONFIGS, GRANULARITY>>>(new_configs, new_config_parents, cc_result, num_colliding_edges, obstacles, nodes, num_obstacles, GRANULARITY, NUM_NEW_CONFIGS);
+        validate_edges<Robot><<<NUM_NEW_CONFIGS, GRANULARITY>>>(new_configs, new_config_parents, cc_result, num_colliding_edges, env, nodes, GRANULARITY, NUM_NEW_CONFIGS);
 
         // add all the new edges to the tree
         grow_tree<Robot><<<numBlocks, blockSize>>>(new_configs, new_config_parents, cc_result, nodes, parents, num_colliding_edges, goal_configs, num_goals, NUM_NEW_CONFIGS);
@@ -283,8 +286,8 @@ void solve(typename Robot::Configuration &start, std::vector<typename Robot::Con
     cudaFree(new_config_parents);
     cudaFree(cc_result);
     cudaFree(num_colliding_edges);
-    cudaFree(obstacles);
+    cudaFree(env);
 }
 
-template void solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, std::vector<float>&);
-template void solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, std::vector<float>&);
+template void solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&);
+template void solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&);

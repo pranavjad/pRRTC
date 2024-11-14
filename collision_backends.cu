@@ -1,7 +1,8 @@
 #include "Robots.hh"
+#include "collision/environment.hh"
 #include <cuda_runtime.h>
 
-namespace utils {
+namespace device_utils {
     __device__ inline constexpr auto dot3(
     const float ax,
     const float ay,
@@ -46,16 +47,16 @@ namespace utils {
         return sqrt(ans);
     }
 
-    __device__ inline bool sphere_environment_in_collision(float *obstacles, int num_obstacles, float sx_, float sy_, float sz_, float sr_)
+    __device__ inline bool sphere_environment_in_collision(ppln::collision::Environment<float> *env, float sx_, float sy_, float sz_, float sr_)
     {
-        for (unsigned int i = 0; i < num_obstacles; i++)
+        for (unsigned int i = 0; i < env->num_spheres; i++)
         {
             if (
                 sphere_sphere_sql2(
-                    obstacles[i * 4],
-                    obstacles[i * 4 + 1],
-                    obstacles[i * 4 + 2],
-                    obstacles[i * 4 + 3],
+                    env->spheres[i].x,
+                    env->spheres[i].y,
+                    env->spheres[i].z,
+                    env->spheres[i].r,
                     sx_, sy_, sz_, sr_) < 0
             )
             {
@@ -67,26 +68,26 @@ namespace utils {
 }
 
 /* Collision checking backend implementations for different robots */
-namespace collision {
-    using namespace utils;
+namespace ppln::collision {
+    using namespace device_utils;
     
     // fkcc -> checks if the config is "good"
     // returns true if the config does collide with an obstacle, returns false if the config does not collide
     template <typename Robot>
-    __device__ bool fkcc(float *config, float *obstacles, int num_obstacles);
+    __device__ bool fkcc(float *config, ppln::collision::Environment<float> *env);
 
 
     template <>
-    __device__ bool fkcc<ppln::robots::Sphere>(float *config, float *obstacles, int num_obstacles)
+    __device__ bool fkcc<ppln::robots::Sphere>(float *config, ppln::collision::Environment<float> *env)
     {
-        return not sphere_environment_in_collision(obstacles, num_obstacles, config[0], config[1], config[2], ppln::robots::Sphere::radius);
+        return not sphere_environment_in_collision(env, config[0], config[1], config[2], ppln::robots::Sphere::radius);
     }
 
     template <>
-    __device__ bool fkcc<ppln::robots::Panda>(float *config, float *obstacles, int num_obstacles)
+    __device__ bool fkcc<ppln::robots::Panda>(float *config, ppln::collision::Environment<float> *env)
     {
         // Ignore static frame collisions - needed for some evaluation problems
-        // if (/*panda_link0*/ sphere_environment_in_collision(obstacles, num_obstacles, 0.0f, 0.0f, 0.05f, 0.08f))
+        // if (/*panda_link0*/ sphere_environment_in_collision(env, 0.0f, 0.0f, 0.05f, 0.08f))
         // {
         //     return false;
         // }  // (0, 0)
@@ -112,21 +113,21 @@ namespace collision {
         float MUL_1680 = MUL_1594 * 0.03f;
         float MUL_1683 = SUB_1587 * 0.03f;
         float NEGATE_1684 = -MUL_1683;
-        if (/*panda_link1*/ sphere_environment_in_collision(obstacles, num_obstacles, SUB_1641, NEGATE_1643, 0.248f, 0.154f))
+        if (/*panda_link1*/ sphere_environment_in_collision(env, SUB_1641, NEGATE_1643, 0.248f, 0.154f))
         {
-            if (sphere_environment_in_collision(obstacles, num_obstacles, MUL_1656, NEGATE_1660, 0.333f, 0.06f))
+            if (sphere_environment_in_collision(env, MUL_1656, NEGATE_1660, 0.333f, 0.06f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, MUL_1680, NEGATE_1684, 0.333f, 0.06f))
+            if (sphere_environment_in_collision(env, MUL_1680, NEGATE_1684, 0.333f, 0.06f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, 0.0f, 0.0f, 0.213f, 0.06f))
+            if (sphere_environment_in_collision(env, 0.0f, 0.0f, 0.213f, 0.06f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, 0.0f, 0.0f, 0.163f, 0.06f))
+            if (sphere_environment_in_collision(env, 0.0f, 0.0f, 0.163f, 0.06f))
             {
                 return false;
             }
@@ -196,21 +197,21 @@ namespace collision {
         float NEGATE_1910 = -MUL_1909;
         float MUL_1913 = MUL_1795 * 0.17f;
         float SUB_1921 = 0.333f - MUL_1913;
-        if (/*panda_link2*/ sphere_environment_in_collision(obstacles, num_obstacles, ADD_1832, SUB_1833, ADD_1835, 0.154f))
+        if (/*panda_link2*/ sphere_environment_in_collision(env, ADD_1832, SUB_1833, ADD_1835, 0.154f))
         {
-            if (sphere_environment_in_collision(obstacles, num_obstacles, MUL_1849, MUL_1851, ADD_1854, 0.06f))
+            if (sphere_environment_in_collision(env, MUL_1849, MUL_1851, ADD_1854, 0.06f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, MUL_1868, MUL_1870, ADD_1873, 0.06f))
+            if (sphere_environment_in_collision(env, MUL_1868, MUL_1870, ADD_1873, 0.06f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, MUL_1882, NEGATE_1886, SUB_1897, 0.06f))
+            if (sphere_environment_in_collision(env, MUL_1882, NEGATE_1886, SUB_1897, 0.06f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, MUL_1906, NEGATE_1910, SUB_1921, 0.06f))
+            if (sphere_environment_in_collision(env, MUL_1906, NEGATE_1910, SUB_1921, 0.06f))
             {
                 return false;
             }
@@ -336,21 +337,21 @@ namespace collision {
         float MUL_2102 = MUL_1966 * 0.02f;
         float ADD_2111 = MUL_2072 + MUL_2102;
         float ADD_2114 = ADD_260 + ADD_2111;
-        if (/*panda_link3*/ sphere_environment_in_collision(obstacles, num_obstacles, ADD_2010, ADD_2011, ADD_2012, 0.128f))
+        if (/*panda_link3*/ sphere_environment_in_collision(env, ADD_2010, ADD_2011, ADD_2012, 0.128f))
         {
-            if (sphere_environment_in_collision(obstacles, num_obstacles, SUB_2037, SUB_2038, SUB_2039, 0.06f))
+            if (sphere_environment_in_collision(env, SUB_2037, SUB_2038, SUB_2039, 0.06f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, SUB_2064, SUB_2065, SUB_2066, 0.05f))
+            if (sphere_environment_in_collision(env, SUB_2064, SUB_2065, SUB_2066, 0.05f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2088, ADD_2089, ADD_2090, 0.055f))
+            if (sphere_environment_in_collision(env, ADD_2088, ADD_2089, ADD_2090, 0.055f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2112, ADD_2113, ADD_2114, 0.055f))
+            if (sphere_environment_in_collision(env, ADD_2112, ADD_2113, ADD_2114, 0.055f))
             {
                 return false;
             }
@@ -478,21 +479,21 @@ namespace collision {
         float MUL_2295 = MUL_2159 * 0.06f;
         float SUB_2304 = MUL_2295 - MUL_2216;
         float ADD_2307 = ADD_405 + SUB_2304;
-        if (/*panda_link4*/ sphere_environment_in_collision(obstacles, num_obstacles, ADD_2203, ADD_2204, ADD_2205, 0.126f))
+        if (/*panda_link4*/ sphere_environment_in_collision(env, ADD_2203, ADD_2204, ADD_2205, 0.126f))
         {
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2233, ADD_2234, ADD_2235, 0.06f))
+            if (sphere_environment_in_collision(env, ADD_2233, ADD_2234, ADD_2235, 0.06f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2254, ADD_2255, ADD_2256, 0.055f))
+            if (sphere_environment_in_collision(env, ADD_2254, ADD_2255, ADD_2256, 0.055f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2275, ADD_2276, ADD_2277, 0.055f))
+            if (sphere_environment_in_collision(env, ADD_2275, ADD_2276, ADD_2277, 0.055f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2305, ADD_2306, ADD_2307, 0.055f))
+            if (sphere_environment_in_collision(env, ADD_2305, ADD_2306, ADD_2307, 0.055f))
             {
                 return false;
             }
@@ -1275,53 +1276,53 @@ namespace collision {
                 return false;
             }
         }  // (557, 557)
-        if (/*panda_link5*/ sphere_environment_in_collision(obstacles, num_obstacles, ADD_2402, ADD_2403, ADD_2404, 0.176f))
+        if (/*panda_link5*/ sphere_environment_in_collision(env, ADD_2402, ADD_2403, ADD_2404, 0.176f))
         {
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2423, ADD_2424, ADD_2425, 0.06f))
+            if (sphere_environment_in_collision(env, ADD_2423, ADD_2424, ADD_2425, 0.06f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2444, ADD_2445, ADD_2446, 0.06f))
+            if (sphere_environment_in_collision(env, ADD_2444, ADD_2445, ADD_2446, 0.06f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, SUB_2471, SUB_2472, SUB_2473, 0.06f))
+            if (sphere_environment_in_collision(env, SUB_2471, SUB_2472, SUB_2473, 0.06f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2501, ADD_2502, ADD_2503, 0.05f))
+            if (sphere_environment_in_collision(env, ADD_2501, ADD_2502, ADD_2503, 0.05f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2534, ADD_2535, ADD_2536, 0.025f))
+            if (sphere_environment_in_collision(env, ADD_2534, ADD_2535, ADD_2536, 0.025f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2567, ADD_2568, ADD_2569, 0.025f))
+            if (sphere_environment_in_collision(env, ADD_2567, ADD_2568, ADD_2569, 0.025f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2600, ADD_2601, ADD_2602, 0.025f))
+            if (sphere_environment_in_collision(env, ADD_2600, ADD_2601, ADD_2602, 0.025f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2633, ADD_2634, ADD_2635, 0.025f))
+            if (sphere_environment_in_collision(env, ADD_2633, ADD_2634, ADD_2635, 0.025f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2672, ADD_2673, ADD_2674, 0.025f))
+            if (sphere_environment_in_collision(env, ADD_2672, ADD_2673, ADD_2674, 0.025f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2711, ADD_2712, ADD_2713, 0.025f))
+            if (sphere_environment_in_collision(env, ADD_2711, ADD_2712, ADD_2713, 0.025f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2750, ADD_2751, ADD_2752, 0.025f))
+            if (sphere_environment_in_collision(env, ADD_2750, ADD_2751, ADD_2752, 0.025f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2789, ADD_2790, ADD_2791, 0.025f))
+            if (sphere_environment_in_collision(env, ADD_2789, ADD_2790, ADD_2791, 0.025f))
             {
                 return false;
             }
@@ -1489,17 +1490,17 @@ namespace collision {
                 return false;
             }
         }  // (637, 637)
-        if (/*panda_link6*/ sphere_environment_in_collision(obstacles, num_obstacles, ADD_2887, ADD_2888, ADD_2889, 0.095f))
+        if (/*panda_link6*/ sphere_environment_in_collision(env, ADD_2887, ADD_2888, ADD_2889, 0.095f))
         {
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_564, ADD_565, ADD_566, 0.05f))
+            if (sphere_environment_in_collision(env, ADD_564, ADD_565, ADD_566, 0.05f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2935, ADD_2936, ADD_2937, 0.05f))
+            if (sphere_environment_in_collision(env, ADD_2935, ADD_2936, ADD_2937, 0.05f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_2959, ADD_2960, ADD_2961, 0.052f))
+            if (sphere_environment_in_collision(env, ADD_2959, ADD_2960, ADD_2961, 0.052f))
             {
                 return false;
             }
@@ -2201,25 +2202,25 @@ namespace collision {
                 return false;
             }
         }  // (793, 793)
-        if (/*panda_link7*/ sphere_environment_in_collision(obstacles, num_obstacles, ADD_3042, ADD_3043, ADD_3044, 0.072f))
+        if (/*panda_link7*/ sphere_environment_in_collision(env, ADD_3042, ADD_3043, ADD_3044, 0.072f))
         {
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3063, ADD_3064, ADD_3065, 0.05f))
+            if (sphere_environment_in_collision(env, ADD_3063, ADD_3064, ADD_3065, 0.05f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3090, ADD_3091, ADD_3092, 0.025f))
+            if (sphere_environment_in_collision(env, ADD_3090, ADD_3091, ADD_3092, 0.025f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3117, ADD_3118, ADD_3119, 0.025f))
+            if (sphere_environment_in_collision(env, ADD_3117, ADD_3118, ADD_3119, 0.025f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3144, ADD_3145, ADD_3146, 0.02f))
+            if (sphere_environment_in_collision(env, ADD_3144, ADD_3145, ADD_3146, 0.02f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3171, ADD_3172, ADD_3173, 0.02f))
+            if (sphere_environment_in_collision(env, ADD_3171, ADD_3172, ADD_3173, 0.02f))
             {
                 return false;
             }
@@ -2409,77 +2410,77 @@ namespace collision {
         float ADD_3787 = ADD_970 + ADD_3784;
         float ADD_3785 = MUL_3319 + MUL_3650;
         float ADD_3788 = ADD_971 + ADD_3785;
-        if (/*panda_hand*/ sphere_environment_in_collision(obstacles, num_obstacles, ADD_3300, ADD_3301, ADD_3302, 0.104f))
+        if (/*panda_hand*/ sphere_environment_in_collision(env, ADD_3300, ADD_3301, ADD_3302, 0.104f))
         {
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3330, ADD_3331, ADD_3332, 0.028f))
+            if (sphere_environment_in_collision(env, ADD_3330, ADD_3331, ADD_3332, 0.028f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3360, ADD_3361, ADD_3362, 0.028f))
+            if (sphere_environment_in_collision(env, ADD_3360, ADD_3361, ADD_3362, 0.028f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3390, ADD_3391, ADD_3392, 0.028f))
+            if (sphere_environment_in_collision(env, ADD_3390, ADD_3391, ADD_3392, 0.028f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3414, ADD_3415, ADD_3416, 0.028f))
+            if (sphere_environment_in_collision(env, ADD_3414, ADD_3415, ADD_3416, 0.028f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3438, ADD_3439, ADD_3440, 0.028f))
+            if (sphere_environment_in_collision(env, ADD_3438, ADD_3439, ADD_3440, 0.028f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3462, ADD_3463, ADD_3464, 0.028f))
+            if (sphere_environment_in_collision(env, ADD_3462, ADD_3463, ADD_3464, 0.028f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3492, ADD_3493, ADD_3494, 0.026f))
+            if (sphere_environment_in_collision(env, ADD_3492, ADD_3493, ADD_3494, 0.026f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3522, ADD_3523, ADD_3524, 0.026f))
+            if (sphere_environment_in_collision(env, ADD_3522, ADD_3523, ADD_3524, 0.026f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3552, ADD_3553, ADD_3554, 0.026f))
+            if (sphere_environment_in_collision(env, ADD_3552, ADD_3553, ADD_3554, 0.026f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3576, ADD_3577, ADD_3578, 0.026f))
+            if (sphere_environment_in_collision(env, ADD_3576, ADD_3577, ADD_3578, 0.026f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3600, ADD_3601, ADD_3602, 0.026f))
+            if (sphere_environment_in_collision(env, ADD_3600, ADD_3601, ADD_3602, 0.026f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3624, ADD_3625, ADD_3626, 0.026f))
+            if (sphere_environment_in_collision(env, ADD_3624, ADD_3625, ADD_3626, 0.026f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3654, ADD_3655, ADD_3656, 0.024f))
+            if (sphere_environment_in_collision(env, ADD_3654, ADD_3655, ADD_3656, 0.024f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3684, ADD_3685, ADD_3686, 0.024f))
+            if (sphere_environment_in_collision(env, ADD_3684, ADD_3685, ADD_3686, 0.024f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3714, ADD_3715, ADD_3716, 0.024f))
+            if (sphere_environment_in_collision(env, ADD_3714, ADD_3715, ADD_3716, 0.024f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3738, ADD_3739, ADD_3740, 0.024f))
+            if (sphere_environment_in_collision(env, ADD_3738, ADD_3739, ADD_3740, 0.024f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3762, ADD_3763, ADD_3764, 0.024f))
+            if (sphere_environment_in_collision(env, ADD_3762, ADD_3763, ADD_3764, 0.024f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3786, ADD_3787, ADD_3788, 0.024f))
+            if (sphere_environment_in_collision(env, ADD_3786, ADD_3787, ADD_3788, 0.024f))
             {
                 return false;
             }
@@ -4463,13 +4464,13 @@ namespace collision {
         float ADD_3943 = MUL_3934 + MUL_3940;
         float ADD_3946 = ADD_1237 + ADD_3943;
         if (/*panda_leftfinger*/ sphere_environment_in_collision(
-            obstacles, num_obstacles, ADD_3896, ADD_3897, ADD_3898, 0.024f))
+            env, ADD_3896, ADD_3897, ADD_3898, 0.024f))
         {
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3920, ADD_3921, ADD_3922, 0.012f))
+            if (sphere_environment_in_collision(env, ADD_3920, ADD_3921, ADD_3922, 0.012f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_3944, ADD_3945, ADD_3946, 0.012f))
+            if (sphere_environment_in_collision(env, ADD_3944, ADD_3945, ADD_3946, 0.012f))
             {
                 return false;
             }
@@ -4989,13 +4990,13 @@ namespace collision {
             }
         }  // (1112, 1112)
         if (/*panda_rightfinger*/ sphere_environment_in_collision(
-            obstacles, num_obstacles, ADD_4028, ADD_4029, ADD_4030, 0.024f))
+            env, ADD_4028, ADD_4029, ADD_4030, 0.024f))
         {
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_4058, ADD_4059, ADD_4060, 0.012f))
+            if (sphere_environment_in_collision(env, ADD_4058, ADD_4059, ADD_4060, 0.012f))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(obstacles, num_obstacles, ADD_4088, ADD_4089, ADD_4090, 0.012f))
+            if (sphere_environment_in_collision(env, ADD_4088, ADD_4089, ADD_4090, 0.012f))
             {
                 return false;
             }

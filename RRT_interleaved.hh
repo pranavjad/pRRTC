@@ -4,6 +4,7 @@
 #include <array>
 
 #include "Robots.hh"
+#include "collision/environment.hh"
 
 
 /* nearest neighbors stuff */
@@ -32,7 +33,7 @@
 /* end nearest neighbors stuff */
 
 template <typename Robot>
-void solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goal, std::vector<float> &obstacles);
+void solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goal, ppln::collision::Environment<float> &environment);
 
-extern template void solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, std::vector<float>&);
-extern template void solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, std::vector<float>&);
+extern template void solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float> &environment);
+extern template void solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float> &environment);
