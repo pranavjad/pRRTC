@@ -1,6 +1,6 @@
 #include "RRT_interleaved.hh"
 #include "Robots.hh"
-#include "collision_backends.cu"
+#include "collision_backends.cuh"
 #include "collision/environment.hh"
 
 #include <curand.h>
@@ -27,6 +27,7 @@ const int NUM_NEW_CONFIGS = 1024;
 const int GRANULARITY = 1024;
 const float RRT_RADIUS = 1.0;
 
+using namespace ppln;
 
 __device__ inline void print_config(float *config, int dim) {
     for (int i = 0; i < dim; i++) {
@@ -225,11 +226,6 @@ void solve(typename Robot::Configuration &start, std::vector<typename Robot::Con
     ppln::collision::Environment<float> *env;
     cudaMalloc(&env, sizeof(env));
     cudaMemcpy(env, &h_environment, sizeof(env), cudaMemcpyHostToDevice);
-    // float *obstacles;
-    // assert(h_environment.num_spheres.size() % 4 == 0);
-    // std::size_t obstacles_size = h_environment.num_spheres * sizeof(float);
-    // cudaMalloc(&obstacles, obstacles_size);
-    // cudaMemcpy(obstacles, h_environment.spheres, obstacles_size, cudaMemcpyHostToDevice);
 
 
     bool done = false;

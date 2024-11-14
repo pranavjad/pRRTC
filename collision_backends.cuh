@@ -1,9 +1,21 @@
+#pragma once
+
 #include "Robots.hh"
 #include "collision/environment.hh"
+#include "collision/shapes.hh"
 #include <cuda_runtime.h>
 
-namespace device_utils {
-    __device__ inline constexpr auto dot3(
+namespace ppln::device_utils {
+    using namespace collision;
+
+    /* math utils */
+    template <typename DataT>
+    __device__ inline constexpr auto dot_2(const DataT &ax, const DataT &ay, const DataT &bx, const DataT &by) -> DataT
+    {
+        return (ax * bx) + (ay * by);
+    }
+
+     __device__ inline constexpr auto dot_3(
     const float ax,
     const float ay,
     const float az,
@@ -13,6 +25,31 @@ namespace device_utils {
     {
         return ax * bx + ay * by + az * bz;
     }
+
+    template <typename DataT>
+    __device__ inline constexpr auto sql2_3(
+        const DataT &ax,
+        const DataT &ay,
+        const DataT &az,
+        const DataT &bx,
+        const DataT &by,
+        const DataT &bz) -> DataT
+    {
+        const auto xs = (ax - bx);
+        const auto ys = (ay - by);
+        const auto zs = (az - bz);
+
+        return dot_3(xs, ys, zs, xs, ys, zs);
+    }
+
+    __device__ inline constexpr auto clamp(const float &v, const float &lower, const float &upper) -> float
+    {
+        return fmaxf(fminf(v, upper), lower);
+    }
+    /* end math utils */
+
+
+    /* Sphere collision utils*/
 
     __device__ inline constexpr auto sphere_sphere_sql2(
         const float ax,
@@ -28,7 +65,18 @@ namespace device_utils {
         const auto dy = ay - by;
         const auto dz = az - bz;
         const auto rsq = ar + br;
-        return dot3(dx, dy, dz, dx, dy, dz) - rsq * rsq;
+        return dot_3(dx, dy, dz, dx, dy, dz) - rsq * rsq;
+    }
+
+    template <typename DataT>
+    __device__ inline constexpr auto sphere_sphere_sql2(
+        const Sphere<DataT> &a,
+        const DataT &x,
+        const DataT &y,
+        const DataT &z,
+        const DataT &r) noexcept -> DataT
+    {
+        return sphere_sphere_sql2(a.x, a.y, a.z, a.r, x, y, z, r);
     }
 
     __device__ inline constexpr auto sphere_sphere_self_collision(float ax, float ay, float az, float ar, float bx, float by, float bz, float br)
@@ -46,23 +94,169 @@ namespace device_utils {
         }
         return sqrt(ans);
     }
+    /* End Sphere collision utils*/
+
+    /* Capsule collision utils */
+    template <typename DataT>
+    __device__ inline constexpr auto sphere_capsule(
+        const Capsule<DataT> &c,
+        const DataT &x,
+        const DataT &y,
+        const DataT &z,
+        const DataT &r) noexcept -> DataT
+    {
+        auto dot = dot_3(x - c.x1, y - c.y1, z - c.z1, c.xv, c.yv, c.zv);
+        auto cdf = clamp((dot * c.rdv), 0.F, 1.F);
+
+        auto sum = sql2_3(x, y, z, c.x1 + c.xv * cdf, c.y1 + c.yv * cdf, c.z1 + c.zv * cdf);
+        auto rs = r + c.r;
+        return sum - rs * rs;
+    }
+
+    template <typename DataT>
+    __device__ inline constexpr auto sphere_capsule(const Capsule<DataT> &c, const Sphere<DataT> &s) noexcept -> DataT
+    {
+        return sphere_capsule(c, s.x, s.y, s.z, s.r);
+    }
+
+    template <typename DataT>
+    __device__ inline constexpr auto sphere_z_aligned_capsule(
+        const Capsule<DataT> &c,
+        const DataT &x,
+        const DataT &y,
+        const DataT &z,
+        const DataT &r) noexcept -> DataT
+    {
+        auto dot = (z - c.z1) * c.zv;
+        auto cdf = clamp((dot * c.rdv), 0.F, 1.F);
+
+        auto sum = sql2_3(x, y, z, c.x1, c.y1, c.z1 + c.zv * cdf);
+        auto rs = r + c.r;
+        return sum - rs * rs;
+    }
+
+    template <typename DataT>
+    __device__ inline constexpr auto sphere_z_aligned_capsule(const Capsule<DataT> &c, const Sphere<DataT> &s) noexcept
+        -> DataT
+    {
+        return sphere_z_aligned_capsule(c, s.x, s.y, s.z, s.r);
+    }
+    /* End Capsule collision functions*/
+
+    /* Begin Cuboid collision functions*/
+    template <typename DataT>
+    __device__ inline constexpr auto sphere_cuboid(
+        const Cuboid<DataT> &c,
+        const DataT &x,
+        const DataT &y,
+        const DataT &z,
+        const DataT &rsq) noexcept -> DataT
+    {
+        auto xs = x - c.x;
+        auto ys = y - c.y;
+        auto zs = z - c.z;
+
+        auto a1 = fmaxf(0., abs((dot_3(c.axis_1_x, c.axis_1_y, c.axis_1_z, xs, ys, zs)) - c.axis_1_r));
+        auto a2 = fmaxf(0., abs((dot_3(c.axis_2_x, c.axis_2_y, c.axis_2_z, xs, ys, zs)) - c.axis_2_r));
+        auto a3 = fmaxf(0., abs((dot_3(c.axis_3_x, c.axis_3_y, c.axis_3_z, xs, ys, zs)) - c.axis_3_r));
+
+        auto sum = dot_3(a1, a2, a3, a1, a2, a3);
+        return sum - rsq;
+    }
+
+    template <typename DataT>
+    __device__ inline constexpr auto sphere_cuboid(const Cuboid<DataT> &c, const Sphere<DataT> &s) noexcept -> DataT
+    {
+        return sphere_cuboid(c, s.x, s.y, s.z, s.r * s.r);
+    }
+
+    template <typename DataT>
+    __device__ inline constexpr auto sphere_z_aligned_cuboid(
+        const Cuboid<DataT> &c,
+        const DataT &x,
+        const DataT &y,
+        const DataT &z,
+        const DataT &rsq) noexcept -> DataT
+    {
+        auto xs = x - c.x;
+        auto ys = y - c.y;
+        auto zs = z - c.z;
+
+        auto a1 = fmaxf(0., (abs(dot_2(c.axis_1_x, c.axis_1_y, xs, ys)) - c.axis_1_r));
+        auto a2 = fmaxf(0., (abs(dot_2(c.axis_2_x, c.axis_2_y, xs, ys)) - c.axis_2_r));
+        auto a3 = fmaxf(0, (abs(zs) - c.axis_3_r));
+
+        auto sum = dot_3(a1, a2, a3, a1, a2, a3);
+        return sum - rsq;
+    }
+
+    template <typename DataT>
+    __device__ inline constexpr auto sphere_z_aligned_cuboid(const Cuboid<DataT> &c, const Sphere<DataT> &s) noexcept
+        -> DataT
+    {
+        return sphere_z_aligned_cuboid(c, s.x, s.y, s.z, s.r * s.r);
+    }
+    /* End Cuboid collision functions*/
+
+
+
 
     __device__ inline bool sphere_environment_in_collision(ppln::collision::Environment<float> *env, float sx_, float sy_, float sz_, float sr_)
     {
+        // check for collision with all spheres in environment
         for (unsigned int i = 0; i < env->num_spheres; i++)
         {
             if (
-                sphere_sphere_sql2(
-                    env->spheres[i].x,
-                    env->spheres[i].y,
-                    env->spheres[i].z,
-                    env->spheres[i].r,
-                    sx_, sy_, sz_, sr_) < 0
+                sphere_sphere_sql2(env->spheres[i], sx_, sy_, sz_, sr_) < 0
             )
             {
                 return true;
             }
         }
+
+        // check for collision with all capsules in environment
+        for (unsigned int i = 0; i < env->num_capsules; i++)
+        {
+            if (
+                sphere_capsule(env->capsules[i], sx_, sy_, sz_, sr_) < 0
+            )
+            {
+                return true;
+            }
+        }
+
+        for (unsigned int i = 0; i < env->num_z_aligned_capsules; i++)
+        {
+            if (
+                sphere_z_aligned_capsule(env->z_aligned_capsules[i], sx_, sy_, sz_, sr_) < 0
+            )
+            {
+                return true;
+            }
+        }
+
+        // check for collision with all cuboids in environment
+        const auto rsq = sr_ * sr_;
+        for (unsigned int i = 0; i < env->num_cuboids; i++)
+        {
+            if (
+                sphere_cuboid(env->cuboids[i], sx_, sy_, sz_, rsq) < 0
+            )
+            {
+                return true;
+            }
+        }
+
+        for (unsigned int i = 0; i < env->num_z_aligned_cuboids; i++)
+        {
+            if (
+                sphere_z_aligned_cuboid(env->z_aligned_cuboids[i], sx_, sy_, sz_, rsq) < 0
+            )
+            {
+                return true;
+            }
+        }
+
         return false;
     }
 }

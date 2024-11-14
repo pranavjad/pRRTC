@@ -41,27 +41,27 @@ namespace ppln::collision
         return dot_3(xs, ys, zs, xs, ys, zs);
     }
 
-    template <typename DataT>
-    inline constexpr auto clamp(const DataT &v, const DataT &lower, const DataT &upper) -> DataT
-    {
-        return v.clamp(lower, upper);
-    }
+    // template <typename DataT>
+    // inline constexpr auto clamp(const DataT &v, const DataT &lower, const DataT &upper) -> DataT
+    // {
+    //     return v.clamp(lower, upper);
+    // }
 
-    template <>
-    inline constexpr auto clamp<float>(const float &v, const float &lower, const float &upper) -> float
-    {
-        return std::max(std::min(v, upper), lower);
-    }
+    // template <>
+    // inline constexpr auto clamp<float>(const float &v, const float &lower, const float &upper) -> float
+    // {
+    //     return std::max(std::min(v, upper), lower);
+    // }
 
-    template <typename DataT>
-    inline constexpr auto sqrt(const DataT &v) -> DataT
-    {
-        return v.sqrt();
-    }
+    // template <typename DataT>
+    // inline constexpr auto sqrt(const DataT &v) -> DataT
+    // {
+    //     return v.sqrt();
+    // }
 
-    template <>
-    inline constexpr auto sqrt<float>(const float &v) -> float
-    {
-        return std::sqrt(v);
-    }
+    // template <>
+    // inline constexpr auto sqrt<float>(const float &v) -> float
+    // {
+    //     return std::sqrt(v);
+    // }
 }  // namespace ppln::collision

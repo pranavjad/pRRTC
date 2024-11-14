@@ -22,6 +22,7 @@ endif()
 add_executable(test_rrt
     test_rrt.cpp
     RRT_interleaved.cu
+    collision_backends.cuh
 )
 
 target_include_directories(test_rrt
