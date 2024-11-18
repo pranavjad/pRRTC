@@ -47,11 +47,10 @@ namespace ppln::collision
     //     return v.clamp(lower, upper);
     // }
 
-    // template <>
-    // inline constexpr auto clamp<float>(const float &v, const float &lower, const float &upper) -> float
-    // {
-    //     return std::max(std::min(v, upper), lower);
-    // }
+    inline constexpr auto clamp(const float &v, const float &lower, const float &upper) -> float
+    {
+        return std::max(std::min(v, upper), lower);
+    }
 
     // template <typename DataT>
     // inline constexpr auto sqrt(const DataT &v) -> DataT

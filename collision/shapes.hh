@@ -5,11 +5,6 @@
 
 #include "math.hh"
 
-// #include <vamp/vector.hh>
-// #include <vamp/collision/math.hh>
-
-// #include <Eigen/Geometry>
-
 /* Adapted from https://github.com/KavrakiLab/vamp/blob/main/src/impl/vamp/collision/shapes.hh */
 
 namespace ppln::collision

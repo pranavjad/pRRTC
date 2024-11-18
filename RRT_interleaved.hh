@@ -33,7 +33,28 @@
 /* end nearest neighbors stuff */
 
 template <typename Robot>
-void solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goal, ppln::collision::Environment<float> &environment);
+struct PlannerResult {
+    bool solved = false;
+    std::vector<int> path; // path found by planner by node index
+    std::vector<typename Robot::Configuration> nodes; // all nodes in the RRT
+    int tree_size;
+    int iters;
+    float cost;
+};
 
-extern template void solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float> &environment);
-extern template void solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float> &environment);
+template <typename Robot>
+float l2dist(typename Robot::Configuration &a, typename Robot::Configuration &b) {
+    float res = 0;
+    float diff;
+    for (int i = 0; i < a.size(); i++) {
+        diff = a[i] - b[i];
+        res += diff * diff;
+    }
+    return sqrt(res);
+}
+
+template <typename Robot>
+PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goal, ppln::collision::Environment<float> &environment);
+
+extern template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float> &environment);
+extern template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float> &environment);

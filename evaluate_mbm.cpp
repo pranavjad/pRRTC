@@ -1,0 +1,163 @@
+#include <nlohmann/json.hpp>
+#include <fstream>
+#include <iostream>
+
+#include "collision/environment.hh"
+#include "collision/factory.hh"
+#include "RRT_interleaved.hh"
+
+using json = nlohmann::json;
+
+using namespace ppln::collision;
+
+std::ifstream f("problems.json");
+
+Environment<float> problem_dict_to_env(const json& problem, const std::string& name) {
+    Environment<float> env;
+    
+    std::vector<Sphere<float>> spheres;
+    std::vector<Capsule<float>> capsules;
+    std::vector<Cuboid<float>> cuboids;
+    // Fill spheres
+    for (const auto& obj : problem["sphere"]) {
+        const json& position = obj["position"];
+        Sphere<float> sphere(position[0], position[1], position[2], obj["radius"]);
+        sphere.name = obj["name"];
+        spheres.push_back(sphere);
+    }
+    // Handle cylinders based on name
+    if (name == "box") {
+        for (const auto& obj : problem["cylinder"]) {
+            const json& position = obj["position"];
+            const json& orientation = obj["orientation_euler_xyz"];
+            const float radius = obj["radius"];
+            auto cuboid = factory::cuboid::flat(
+                position[0], position[1], position[2],
+                orientation[0], orientation[1], orientation[2],
+                radius, radius, radius/2.0
+            );
+            cuboid.name = obj["name"];
+            cuboids.push_back(cuboid);
+        }
+    } else {
+        for (const auto& obj : problem["cylinder"]) {
+            const json& position = obj["position"];
+            const json& euler = obj["orientation_euler_xyz"];
+            const float radius = obj["radius"];
+            const float length = obj["length"];
+            auto cylinder = factory::cylinder::center::flat(
+                position[0], position[1], position[2],
+                euler[0], euler[1], euler[2],
+                radius, length
+            );
+            cylinder.name = obj["name"];
+            capsules.push_back(cylinder);
+        }
+    }
+    // Fill boxes
+    for (const auto& obj : problem["box"]) {
+        const json& position = obj["position"];
+        const json& orientation = obj["orientation_euler_xyz"];
+        const json& half_extents = obj["half_extents"];
+        auto cuboid = factory::cuboid::flat(
+            position[0], position[1], position[2],
+            orientation[0], orientation[1], orientation[2],
+            half_extents[0], half_extents[1], half_extents[2]  // Fixed typo in half_extends
+        );
+        cuboid.name = obj["name"];
+        cuboids.push_back(cuboid);
+    }
+    // Allocate memory on the heap for the arrays
+    if (!spheres.empty()) {
+        env.spheres = new Sphere<float>[spheres.size()];
+        std::copy(spheres.begin(), spheres.end(), env.spheres);
+        env.num_spheres = spheres.size();
+    } else {
+        env.spheres = nullptr;
+        env.num_spheres = 0;
+    }
+
+    if (!capsules.empty()) {
+        env.capsules = new Capsule<float>[capsules.size()];
+        std::copy(capsules.begin(), capsules.end(), env.capsules);
+        env.num_capsules = capsules.size();
+    } else {
+        env.capsules = nullptr;
+        env.num_capsules = 0;
+    }
+
+    if (!cuboids.empty()) {
+        env.cuboids = new Cuboid<float>[cuboids.size()];
+        std::copy(cuboids.begin(), cuboids.end(), env.cuboids);
+        env.num_cuboids = cuboids.size();
+    } else {
+        env.cuboids = nullptr;
+        env.num_cuboids = 0;
+    }
+
+    // Initialize other pointers to nullptr
+    env.z_aligned_capsules = nullptr;
+    env.num_z_aligned_capsules = 0;
+    env.cylinders = nullptr;
+    env.num_cylinders = 0;
+    env.z_aligned_cuboids = nullptr;
+    env.num_z_aligned_cuboids = 0;
+
+    return env;
+}
+
+
+int main() {
+    json all_data = json::parse(f);
+    json problems = all_data["problems"];
+    using Configuration = robots::Panda::Configuration;
+    // vector<int> failures;
+    int failed = 0;
+    // for (auto& [key, value] : problems.items()) {
+    //     std::cout << key << "\n";
+    //     std::cout << problems[key][0] << "\n";
+    //     break;
+    // }
+    std::map<std::string, std::vector<PlannerResult<robots::Panda>>> results;
+    for (auto& [name, pset] : problems.items()) {
+        std::cout << name << "\n";
+        for (int i = 0; i < pset.size(); i++) {
+            json data = pset[i];
+            if (not data["valid"]) {
+                continue;
+            }
+            auto env = problem_dict_to_env(data, name);
+            Configuration start = data["start"];
+            std::vector<Configuration> goals = data["goals"];
+            auto result = solve<robots::Panda>(start, goals, env);
+            if (not result.solved) {
+                failed ++;
+            }
+            // else {
+            //     std::cout << "Solved: " << name << std::endl;
+            // }
+            // std::cout << "path length: " << result.path.size() << "\n";
+            // std::cout << "tree size: " << result.tree_size << "\n";
+            // std::cout << "iters: " << result.iters << "\n";
+            // std::cout << "cost: " << result.cost << "\n";
+            results[name].emplace_back(result);
+        }
+    }
+
+    for (auto& [name, pset] : problems.items()) {
+        std::cout << name << std::endl;
+        float avg_cost = 0;
+        float min_cost = 1e9;
+        float max_cost = 0;
+        for (auto &result : results[name]) {
+            avg_cost += result.cost;
+            min_cost = std::min(min_cost, result.cost);
+            max_cost = std::max(max_cost, result.cost);
+        }
+        avg_cost /= results[name].size();
+        std::cout << "avg cost: " << avg_cost << std::endl;
+        std::cout << "min cost: " << min_cost << std::endl;
+        std::cout << "max cost: " << max_cost << std::endl;
+        std::cout << "----" << std::endl;
+    }
+}

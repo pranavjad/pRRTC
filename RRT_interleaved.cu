@@ -22,10 +22,10 @@ __device__ int found_goal_idx;
 
 const int MAX_SAMPLES = 1000000;
 const int MAX_ITERS = 1000000;
-const int COORD_BOUND = 2.0;
+const int COORD_BOUND = 3.0;
 const int NUM_NEW_CONFIGS = 1024;
-const int GRANULARITY = 1024;
-const float RRT_RADIUS = 1.0;
+const int GRANULARITY = 4096;
+const float RRT_RADIUS = 2.0;
 
 using namespace ppln;
 
@@ -117,10 +117,10 @@ __global__ void sample_edges(float *new_configs, int *new_config_parents, float 
         }
     }
 
-    if (tid == 0) {
-        printf("%d\n", atomic_free_index);
-        printf("%f\n", min_dist);
-    }
+    // if (tid == 0) {
+    //     printf("%d\n", atomic_free_index);
+    //     printf("%f\n", min_dist);
+    // }
 
     // keep it within the rrt range
     if (min_dist > RRT_RADIUS) {
@@ -150,7 +150,7 @@ __global__ void grow_tree(float *new_configs, int *new_config_parents, bool *cc_
         int goal_size = dim * sizeof(float);
         for (int i = 0; i < num_goals; i++) {
             float dist_to_goal = device_utils::l2_dist(new_configs, &goal_configs[i * goal_size], dim);
-            if (dist_to_goal < 0.001) {
+            if (dist_to_goal < 0.0001) {
                 reached_goal = true;
                 found_goal_idx = i;
                 return;
@@ -170,14 +170,24 @@ __global__ void grow_tree(float *new_configs, int *new_config_parents, bool *cc_
     parents[my_index] = new_config_parents[tid];
 }
 
+inline void reset_device_variables() {
+    int zero = 0;
+    bool false_val = false;
+    
+    cudaMemcpyToSymbol(atomic_free_index, &zero, sizeof(int));
+    cudaMemcpyToSymbol(reached_goal, &false_val, sizeof(bool));
+    cudaMemcpyToSymbol(found_goal_idx, &zero, sizeof(int));
+}
+
+
 template <typename Robot>
-void solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &h_environment) {
+PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &h_environment) {
     static constexpr auto dim = Robot::dimension;
     std::size_t iter = 0;
     std::size_t start_index = 0;
     std::size_t free_index = start_index + 1;
 
-    
+    PlannerResult<Robot> res;
 
     // copy stuff to GPU
     // GPU needs: start, goal, tree, parents, nodes
@@ -231,48 +241,68 @@ void solve(typename Robot::Configuration &start, std::vector<typename Robot::Con
     bool done = false;
     // main RRT loop
     while (iter++ < MAX_ITERS && free_index < MAX_SAMPLES) {
-        std::cout << iter << std::endl;
+        // std::cout << iter << std::endl;
         // sample configurations and get edges to be checked
         sample_edges<Robot><<<numBlocks, blockSize>>>(new_configs, new_config_parents, nodes, goal_configs, num_goals, rng_states, NUM_NEW_CONFIGS);
-
+        cudaDeviceSynchronize();
         // collision check all the edges
         cudaMemset(cc_result, 0, NUM_NEW_CONFIGS);
         validate_edges<Robot><<<NUM_NEW_CONFIGS, GRANULARITY>>>(new_configs, new_config_parents, cc_result, num_colliding_edges, env, nodes, GRANULARITY, NUM_NEW_CONFIGS);
-
+        cudaDeviceSynchronize();
         // add all the new edges to the tree
         grow_tree<Robot><<<numBlocks, blockSize>>>(new_configs, new_config_parents, cc_result, nodes, parents, num_colliding_edges, goal_configs, num_goals, NUM_NEW_CONFIGS);
-
+        cudaDeviceSynchronize();
         // update free index
         cudaMemcpyFromSymbol(&free_index, atomic_free_index, sizeof(int), 0, cudaMemcpyDeviceToHost);
+        res.tree_size = free_index;
         cudaMemcpyFromSymbol(&done, reached_goal, sizeof(bool), 0, cudaMemcpyDeviceToHost);
         if (done) break;
     }
-
+    res.iters = iter;
     // retrieve data from gpu
     std::vector<int> h_parents(MAX_SAMPLES);
     std::vector<float> h_nodes(MAX_SAMPLES * dim);
     cudaMemcpy(h_parents.data(), parents, MAX_SAMPLES * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_nodes.data(), nodes, MAX_SAMPLES * config_size, cudaMemcpyDeviceToHost);
 
-    std::vector<int> path;
+    // change representation of RRT nodes from flattened vector to vector of Configurations
+    typename Robot::Configuration cfg;
+    for (int i = 0; i < MAX_SAMPLES; i++) {
+        for (int j = 0; j < dim; j++) {
+            cfg[j] = h_nodes[i * dim + j];
+        }
+        res.nodes.emplace_back(cfg);
+    }
 
+    // compute the path
+    // std::vector<int> path;
+    
     if (done) {
-        std::cout << "Found Goal!" << std::endl;
-
+        // get the index of the goal we found in the goals array
+        int h_goal_idx;
+        cudaMemcpyFromSymbol(&h_goal_idx, found_goal_idx, sizeof(int), 0, cudaMemcpyDeviceToHost);
+        // std::cout << "Found Goal: " << h_goal_idx << std::endl;
+        res.solved = true;
         // get parent at position 0 in new_config_parents, because that will be the parent of the goal
         int parent_idx = -1;
         cudaMemcpy(&parent_idx, new_config_parents, sizeof(int), cudaMemcpyDeviceToHost);
         assert(parent_idx != -1);
-        std::cout << parent_idx << std::endl;
+        typename Robot::Configuration cfg;
+        typename Robot::Configuration cfg_parent;
+        std::copy_n(h_nodes.begin() + parent_idx, dim, cfg.begin());
+        res.cost += l2dist<Robot>(goals[h_goal_idx], cfg);
         while (parent_idx != h_parents[parent_idx]) {
-            std::cout << parent_idx << std::endl;
-            path.emplace_back(parent_idx);
+            // std::cout << parent_idx << std::endl;
+            std::copy_n(h_nodes.begin() + parent_idx, dim, cfg.begin());
+            std::copy_n(h_nodes.begin() + h_parents[parent_idx], dim, cfg_parent.begin());
+            res.cost += l2dist<Robot>(cfg, cfg_parent);
+            res.path.emplace_back(parent_idx);
             parent_idx = h_parents[parent_idx];
         }
-        path.emplace_back(parent_idx);
-        std::reverse(path.begin(), path.end());
+        res.path.emplace_back(parent_idx);
+        std::reverse(res.path.begin(), res.path.end());
     }
-
+    reset_device_variables();
     cudaFree(start_config);
     cudaFree(goal_configs);
     cudaFree(nodes);
@@ -283,7 +313,8 @@ void solve(typename Robot::Configuration &start, std::vector<typename Robot::Con
     cudaFree(cc_result);
     cudaFree(num_colliding_edges);
     cudaFree(env);
+    return res;
 }
 
-template void solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&);
-template void solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&);
+template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&);
+template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&);

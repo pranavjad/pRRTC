@@ -49,7 +49,7 @@ void panda_test() {
     robots::Panda::Configuration start = {0., -0.785, 0., -2.356, 0., 1.571, 0.785};
     std::vector<robots::Panda::Configuration> goals = {{2.35, 1., 0., -0.8, 0, 2.5, 0.785}};
 
-    solve<robots::Panda>(start, goals, env);
+    auto res = solve<robots::Panda>(start, goals, env);
 }
 
 int main() {

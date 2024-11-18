@@ -33,5 +33,14 @@ namespace ppln::collision
         // unsigned int num_heightfields;
 
         Environment() = default;
+
+        ~Environment() {
+            delete[] spheres;
+            delete[] capsules;
+            delete[] cuboids;
+            delete[] z_aligned_capsules;
+            delete[] cylinders;
+            delete[] z_aligned_cuboids;
+        }
     };
 }  // namespace ppln::collision
