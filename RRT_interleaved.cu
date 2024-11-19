@@ -187,6 +187,7 @@ PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typ
     std::size_t start_index = 0;
     std::size_t free_index = start_index + 1;
 
+    auto start_time = std::chrono::steady_clock::now();
     PlannerResult<Robot> res;
 
     // copy stuff to GPU
@@ -254,11 +255,13 @@ PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typ
         cudaDeviceSynchronize();
         // update free index
         cudaMemcpyFromSymbol(&free_index, atomic_free_index, sizeof(int), 0, cudaMemcpyDeviceToHost);
-        res.tree_size = free_index;
+        
         cudaMemcpyFromSymbol(&done, reached_goal, sizeof(bool), 0, cudaMemcpyDeviceToHost);
         if (done) break;
     }
+    res.tree_size = free_index;
     res.iters = iter;
+    res.attempted_tree_size = NUM_NEW_CONFIGS * iter;
     // retrieve data from gpu
     std::vector<int> h_parents(MAX_SAMPLES);
     std::vector<float> h_nodes(MAX_SAMPLES * dim);
@@ -291,17 +294,39 @@ PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typ
         typename Robot::Configuration cfg_parent;
         std::copy_n(h_nodes.begin() + parent_idx, dim, cfg.begin());
         res.cost += l2dist<Robot>(goals[h_goal_idx], cfg);
+        // std::cout << "\n----\n";
+        // std::cout << "goal: ";
+        // for (int i = 0; i < goals[h_goal_idx].size(); i++) std::cout << goals[h_goal_idx][i] << " ";
+        // std::cout << '\n';
         while (parent_idx != h_parents[parent_idx]) {
             // std::cout << parent_idx << std::endl;
             std::copy_n(h_nodes.begin() + parent_idx, dim, cfg.begin());
             std::copy_n(h_nodes.begin() + h_parents[parent_idx], dim, cfg_parent.begin());
+
+            // for (int i = 0; i < cfg.size(); i++) std::cout << cfg[i] << " ";
+            // std::cout << '\n';
+            // for (int i = 0; i < cfg.size(); i++) std::cout << cfg_parent[i] << " ";
+            // std::cout << '\n';
+
+            // std::cout << l2dist<Robot>(cfg, cfg_parent) << "\n";
             res.cost += l2dist<Robot>(cfg, cfg_parent);
             res.path.emplace_back(parent_idx);
             parent_idx = h_parents[parent_idx];
         }
+
+        // std::copy_n(h_nodes.begin() + parent_idx, dim, cfg.begin());
+        // std::copy_n(h_nodes.begin() + h_parents[parent_idx], dim, cfg_parent.begin());
+        // for (int i = 0; i < cfg.size(); i++) std::cout << cfg[i] << " ";
+        // std::cout << '\n';
+        // for (int i = 0; i < cfg.size(); i++) std::cout << cfg_parent[i] << " ";
+        // std::cout << "\nstart: ";
+        // for (int i = 0; i < cfg.size(); i++) std::cout << start[i] << " ";
+        // std::cout << '\n';
+        // std::cout << "\n----\n";
         res.path.emplace_back(parent_idx);
         std::reverse(res.path.begin(), res.path.end());
     }
+    res.nanoseconds = get_elapsed_nanoseconds(start_time);
     reset_device_variables();
     cudaFree(start_config);
     cudaFree(goal_configs);

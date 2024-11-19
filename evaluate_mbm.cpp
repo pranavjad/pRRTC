@@ -107,17 +107,16 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
 }
 
 
+inline void describe(std::vector<PlannerResult<robots::Panda>> &results) {
+
+}
+
+
 int main() {
     json all_data = json::parse(f);
     json problems = all_data["problems"];
     using Configuration = robots::Panda::Configuration;
-    // vector<int> failures;
     int failed = 0;
-    // for (auto& [key, value] : problems.items()) {
-    //     std::cout << key << "\n";
-    //     std::cout << problems[key][0] << "\n";
-    //     break;
-    // }
     std::map<std::string, std::vector<PlannerResult<robots::Panda>>> results;
     for (auto& [name, pset] : problems.items()) {
         std::cout << name << "\n";
@@ -132,6 +131,7 @@ int main() {
             auto result = solve<robots::Panda>(start, goals, env);
             if (not result.solved) {
                 failed ++;
+                std::cout << "failed " << name << std::endl;
             }
             // else {
             //     std::cout << "Solved: " << name << std::endl;
@@ -146,6 +146,8 @@ int main() {
 
     for (auto& [name, pset] : problems.items()) {
         std::cout << name << std::endl;
+
+        // calculate stats for cost 
         float avg_cost = 0;
         float min_cost = 1e9;
         float max_cost = 0;
@@ -158,6 +160,35 @@ int main() {
         std::cout << "avg cost: " << avg_cost << std::endl;
         std::cout << "min cost: " << min_cost << std::endl;
         std::cout << "max cost: " << max_cost << std::endl;
+        std::cout << std::endl;
+
+        // calculate stats for cost 
+        std::size_t net_time = 0;
+        std::size_t min_time = 1e9;
+        std::size_t max_time = 0;
+        for (auto &result : results[name]) {
+            net_time += result.nanoseconds;
+            min_time = std::min(min_time, result.nanoseconds);
+            max_time = std::max(max_time, result.nanoseconds);
+        }
+        float avg_time = net_time / results[name].size();
+        std::cout << "avg time (μs): " << avg_time/1000 << std::endl;
+        std::cout << "min time (μs): " << min_time/1000 << std::endl;
+        std::cout << "max time (μs): " << max_time/1000 << std::endl;
+
+        // calculate stats for time per iter 
+        float avg_time_per_iter = 0.0;
+        float avg_time_per_attempted_iter = 0.0;
+        for (auto &result : results[name]) {
+            float time_per_attempted_iter = (float)result.nanoseconds / result.attempted_tree_size;
+            float time_per_iter = (float)result.nanoseconds / result.tree_size;
+            avg_time_per_iter += time_per_iter;
+            avg_time_per_attempted_iter += time_per_attempted_iter;
+        }
+        avg_time_per_iter = avg_time_per_iter / results[name].size();
+        avg_time_per_attempted_iter = avg_time_per_attempted_iter / results[name].size();
+        std::cout << "avg time per iter (μs): " << avg_time_per_iter/1000 << std::endl;
+        std::cout << "avg time per attempted iter (μs): " << avg_time_per_attempted_iter/1000 << std::endl;
         std::cout << "----" << std::endl;
     }
 }

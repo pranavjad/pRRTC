@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <array>
+#include <chrono>
 
 #include "Robots.hh"
 #include "collision/environment.hh"
@@ -37,13 +38,16 @@ struct PlannerResult {
     bool solved = false;
     std::vector<int> path; // path found by planner by node index
     std::vector<typename Robot::Configuration> nodes; // all nodes in the RRT
-    int tree_size;
-    int iters;
-    float cost;
+    int tree_size = 0;
+    int iters = 0;
+    float cost = 0.0;
+    std::size_t nanoseconds = 0;
+    std::size_t attempted_tree_size = 0;
 };
 
 template <typename Robot>
-float l2dist(typename Robot::Configuration &a, typename Robot::Configuration &b) {
+float l2dist(typename Robot::Configuration &a, typename Robot::Configuration &b)
+{
     float res = 0;
     float diff;
     for (int i = 0; i < a.size(); i++) {
@@ -51,6 +55,11 @@ float l2dist(typename Robot::Configuration &a, typename Robot::Configuration &b)
         res += diff * diff;
     }
     return sqrt(res);
+}
+
+inline std::size_t get_elapsed_nanoseconds(const std::chrono::time_point<std::chrono::steady_clock> &start)
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
 }
 
 template <typename Robot>
