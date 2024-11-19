@@ -2,9 +2,9 @@
 
 Implements a parallelized RRT with parallelized collision checking.
 
-To build and run test script:
+To build and run benchmark:
 ```
 cmake -B build
 cmake --build build
-build/test_rrt
+build/evaluate_mbm
 ```
