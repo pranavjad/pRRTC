@@ -10,7 +10,7 @@ using json = nlohmann::json;
 
 using namespace ppln::collision;
 
-std::ifstream f("problems.json");
+std::ifstream f("panda_problems.json");
 
 Environment<float> problem_dict_to_env(const json& problem, const std::string& name) {
     Environment<float> env;
@@ -187,8 +187,8 @@ int main() {
         }
         avg_time_per_iter = avg_time_per_iter / results[name].size();
         avg_time_per_attempted_iter = avg_time_per_attempted_iter / results[name].size();
-        std::cout << "avg time per iter (μs): " << avg_time_per_iter/1000 << std::endl;
-        std::cout << "avg time per attempted iter (μs): " << avg_time_per_attempted_iter/1000 << std::endl;
+        std::cout << "avg time per node added to tree (μs): " << avg_time_per_iter/1000 << std::endl;
+        std::cout << "avg time per attempted addition of node (μs): " << avg_time_per_attempted_iter/1000 << std::endl;
         std::cout << "----" << std::endl;
     }
 }

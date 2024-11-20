@@ -47,10 +47,19 @@ __global__ void validate_edges(float *new_configs, int *new_config_parents, bool
     // total_threads = num_samples * granularity;
     if (bid >= num_samples) return;
     if (tid_in_block >= granularity) return;
+    
+    __shared__ float len;
+    __shared__ float shared_edge_start[dim];
+    if (tid_in_block == 0) {
+        float *edge_start = &nodes[new_config_parents[bid] * dim];
+        float *edge_end = &new_configs[bid * dim];
+        len = device_utils::l2_dist(edge_start, edge_end, dim);
+        for (int i = 0; i < dim; i++) {
+            shared_edge_start[i] = edge_start[i];
+        }
+    }
+    __syncthreads();
 
-    float *edge_start = &nodes[new_config_parents[bid] * dim];
-    float *edge_end = &new_configs[bid * dim];
-    float len = device_utils::l2_dist(edge_start, edge_end, dim);
 
 
     float delta = len / (float) granularity;
@@ -58,15 +67,11 @@ __global__ void validate_edges(float *new_configs, int *new_config_parents, bool
     // calculate the configuration this thread will be checking
     float config[dim];
     for (int i = 0; i < dim; i++) {
-        config[i] = edge_start[i] + (tid_in_block * delta);
+        config[i] = shared_edge_start[i] + (tid_in_block * delta);
     }
 
     // check for collision
     bool config_in_collision = not ppln::collision::fkcc<Robot>(config, env);
-    // if (cc_result[bid] == false && config_in_collision) {
-    //     atomicAdd(num_colliding_edges, 1);
-    //     // printf("collision: %d\n", num_colliding_edges);
-    // }
     cc_result[bid] |= config_in_collision;
 }
 
@@ -253,9 +258,9 @@ PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typ
         // add all the new edges to the tree
         grow_tree<Robot><<<numBlocks, blockSize>>>(new_configs, new_config_parents, cc_result, nodes, parents, num_colliding_edges, goal_configs, num_goals, NUM_NEW_CONFIGS);
         cudaDeviceSynchronize();
+        
         // update free index
         cudaMemcpyFromSymbol(&free_index, atomic_free_index, sizeof(int), 0, cudaMemcpyDeviceToHost);
-        
         cudaMemcpyFromSymbol(&done, reached_goal, sizeof(bool), 0, cudaMemcpyDeviceToHost);
         if (done) break;
     }
