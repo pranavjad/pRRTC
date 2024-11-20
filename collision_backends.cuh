@@ -85,7 +85,7 @@ namespace ppln::device_utils {
     }
 
     // returns squared l2 distance between two configs
-    __device__ float l2_dist(float *config_a, float *config_b, const int dim) {
+    __device__ inline float l2_dist(float *config_a, float *config_b, const int dim) {
         float ans = 0;
         float diff;
         for (int i = 0; i < dim; i++) {
