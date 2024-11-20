@@ -295,13 +295,13 @@ PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typ
     cudaMemcpy(h_nodes.data(), nodes, MAX_SAMPLES * config_size, cudaMemcpyDeviceToHost);
 
     // change representation of RRT nodes from flattened vector to vector of Configurations
-    typename Robot::Configuration cfg;
-    for (int i = 0; i < MAX_SAMPLES; i++) {
-        for (int j = 0; j < dim; j++) {
-            cfg[j] = h_nodes[i * dim + j];
-        }
-        res.nodes.emplace_back(cfg);
-    }
+    // typename Robot::Configuration cfg;
+    // for (int i = 0; i < MAX_SAMPLES; i++) {
+    //     for (int j = 0; j < dim; j++) {
+    //         cfg[j] = h_nodes[i * dim + j];
+    //     }
+    //     res.nodes.emplace_back(cfg);
+    // }
 
     // compute the path
     // std::vector<int> path;

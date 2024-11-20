@@ -46,7 +46,7 @@ struct PlannerResult {
 };
 
 template <typename Robot>
-float l2dist(typename Robot::Configuration &a, typename Robot::Configuration &b)
+inline float l2dist(typename Robot::Configuration &a, typename Robot::Configuration &b)
 {
     float res = 0;
     float diff;
