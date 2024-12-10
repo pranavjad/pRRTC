@@ -16,6 +16,15 @@ Parallelized RRT with parallelized collision checking.
 Interleaved strategy: sample states in parallel, then check edges in parallel, then repeat.
 */
 
+// Error checking macro
+#define cudaCheckError(ans) { cudaAssert((ans), __FILE__, __LINE__); }
+inline void cudaAssert(cudaError_t code, const char *file, int line) {
+    if (code != cudaSuccess) {
+        fprintf(stderr, "CUDA Error: %s %s %d\n", cudaGetErrorString(code), file, line);
+        exit(code);
+    }
+}
+
 __device__ int atomic_free_index;
 __device__ bool reached_goal = false;
 __device__ int found_goal_idx;
@@ -23,12 +32,12 @@ __device__ int found_goal_idx;
 constexpr int MAX_SAMPLES = 1000000;
 constexpr int MAX_ITERS = 1000000;
 constexpr int COORD_BOUND = 3.0;
-constexpr int NUM_NEW_CONFIGS = 1024;
-constexpr int GRANULARITY = 4096;
+constexpr int NUM_NEW_CONFIGS = 512;
+constexpr int GRANULARITY = 256;
 constexpr float RRT_RADIUS = 2.0;
 
 // threads per block for sample_edges and grow_tree
-constexpr int BLOCK_SIZE = 256;
+constexpr int BLOCK_SIZE = 128;
 
 using namespace ppln;
 
@@ -51,13 +60,13 @@ __global__ void validate_edges(float *new_configs, int *new_config_parents, floa
     if (bid >= NUM_NEW_CONFIGS) return;
     if (tid_in_block >= GRANULARITY) return;
     
-    __shared__ float delta;
+    __shared__ float delta[dim];
     __shared__ float shared_edge_start[dim];
     if (tid_in_block == 0) {
         float *edge_start = &nodes[new_config_parents[bid] * dim];
-        delta = new_config_dist[bid] / (float) GRANULARITY;
         for (int i = 0; i < dim; i++) {
             shared_edge_start[i] = edge_start[i];
+            delta[i] = (new_configs[i] - edge_start[i]) / (float) GRANULARITY;;
         }
     }
     __syncthreads();
@@ -65,7 +74,7 @@ __global__ void validate_edges(float *new_configs, int *new_config_parents, floa
     // calculate the configuration this thread will be checking
     float config[dim];
     for (int i = 0; i < dim; i++) {
-        config[i] = shared_edge_start[i] + (tid_in_block * delta);
+        config[i] = shared_edge_start[i] + (tid_in_block * delta[i]);
     }
 
     // check for collision
@@ -84,6 +93,7 @@ __global__ void init_rng(curandState* states, unsigned long seed) {
 // sample a new state -> connect it to nearest neighbor in our tree
 template <typename Robot>
 __global__ void sample_edges(float *new_configs, int *new_config_parents, float *new_config_dist, float *nodes, float *goal_configs, int num_goals, curandState *rng_states) {
+    // printf("here!");
     static constexpr auto dim = Robot::dimension;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= NUM_NEW_CONFIGS) return;
@@ -183,6 +193,7 @@ __global__ void grow_tree(float *new_configs, int *new_config_parents, float *ne
 
     // Atomically get the next free index
     int my_index = atomicAdd(&atomic_free_index, 1);
+    if (my_index >= MAX_SAMPLES) return;
     
     // Copy the configuration to the nodes array
     for (int i = 0; i < dim; i++) {
@@ -203,8 +214,70 @@ inline void reset_device_variables() {
 }
 
 
+void printCUDADeviceInfo() {
+    int deviceCount;
+    cudaError_t error = cudaGetDeviceCount(&deviceCount);
+    
+    if (error != cudaSuccess) {
+        std::cerr << "Error getting device count: " << cudaGetErrorString(error) << std::endl;
+        return;
+    }
+    
+    std::cout << "Found " << deviceCount << " CUDA device(s)\n\n";
+    
+    for (int device = 0; device < deviceCount; ++device) {
+        cudaDeviceProp prop;
+        error = cudaGetDeviceProperties(&prop, device);
+        
+        if (error != cudaSuccess) {
+            std::cerr << "Error getting device properties: " << cudaGetErrorString(error) << std::endl;
+            continue;
+        }
+        
+        std::cout << "Device " << device << ": " << prop.name << "\n";
+        std::cout << "============================================\n";
+        std::cout << "Compute Capability: " << prop.major << "." << prop.minor << "\n";
+        
+        // Memory Information
+        std::cout << "Total Global Memory: " << prop.totalGlobalMem / (1024.0 * 1024.0) << " MB\n";
+        std::cout << "Total Constant Memory: " << prop.totalConstMem / 1024.0 << " KB\n";
+        std::cout << "Shared Memory Per Block: " << prop.sharedMemPerBlock / 1024.0 << " KB\n";
+        std::cout << "L2 Cache Size: " << prop.l2CacheSize / 1024.0 << " KB\n";
+        
+        // Thread Information
+        std::cout << "Max Threads Per Block: " << prop.maxThreadsPerBlock << "\n";
+        std::cout << "Max Threads Per Multiprocessor: " << prop.maxThreadsPerMultiProcessor << "\n";
+        std::cout << "Number of Multiprocessors: " << prop.multiProcessorCount << "\n";
+        std::cout << "Warp Size: " << prop.warpSize << "\n";
+        
+        // Block Dimensions
+        std::cout << "Max Block Dimensions: " 
+                  << prop.maxThreadsDim[0] << " x "
+                  << prop.maxThreadsDim[1] << " x "
+                  << prop.maxThreadsDim[2] << "\n";
+        
+        // Grid Dimensions
+        std::cout << "Max Grid Dimensions: "
+                  << prop.maxGridSize[0] << " x "
+                  << prop.maxGridSize[1] << " x "
+                  << prop.maxGridSize[2] << "\n";
+        
+        // Memory Clock and Bus Width
+        std::cout << "Memory Clock Rate: " << prop.memoryClockRate / 1000.0 << " MHz\n";
+        std::cout << "Memory Bus Width: " << prop.memoryBusWidth << " bits\n";
+        
+        // Additional Features
+        std::cout << "Unified Addressing: " << (prop.unifiedAddressing ? "Yes" : "No") << "\n";
+        std::cout << "Concurrent Kernels: " << (prop.concurrentKernels ? "Yes" : "No") << "\n";
+        std::cout << "ECC Enabled: " << (prop.ECCEnabled ? "Yes" : "No") << "\n";
+        
+        std::cout << "\n";
+    }
+}
+
 template <typename Robot>
 PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &h_environment) {
+    // printCUDADeviceInfo();
     static constexpr auto dim = Robot::dimension;
     std::size_t iter = 0;
     std::size_t start_index = 0;
@@ -268,21 +341,28 @@ PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typ
     bool done = false;
     // main RRT loop
     while (iter++ < MAX_ITERS && free_index < MAX_SAMPLES) {
-        // std::cout << iter << std::endl;
+        // std::cout << "iter: " << iter << std::endl;
         // sample configurations and get edges to be checked
         sample_edges<Robot><<<numBlocks, BLOCK_SIZE>>>(new_configs, new_config_parents, new_config_dist, nodes, goal_configs, num_goals, rng_states);
+        // cudaCheckError(cudaGetLastError());
         cudaDeviceSynchronize();
         // collision check all the edges
         cudaMemset(cc_result, 0, NUM_NEW_CONFIGS);
+        // std::cout << "validate\n";
         validate_edges<Robot><<<NUM_NEW_CONFIGS, GRANULARITY>>>(new_configs, new_config_parents, new_config_dist, cc_result, num_colliding_edges, env, nodes);
+        // cudaCheckError(cudaGetLastError());
         cudaDeviceSynchronize();
         // add all the new edges to the tree
+        // std::cout << "grow\n";
         grow_tree<Robot><<<numBlocks, BLOCK_SIZE>>>(new_configs, new_config_parents, new_config_dist, cc_result, nodes, parents, num_colliding_edges, goal_configs, num_goals);
+        // cudaCheckError(cudaGetLastError());
         cudaDeviceSynchronize();
-        
+        // std::cout << "end loop\n";
         // update free index
         cudaMemcpyFromSymbol(&free_index, atomic_free_index, sizeof(int), 0, cudaMemcpyDeviceToHost);
+        // cudaCheckError(cudaGetLastError());
         cudaMemcpyFromSymbol(&done, reached_goal, sizeof(bool), 0, cudaMemcpyDeviceToHost);
+        // cudaCheckError(cudaGetLastError());
         if (done) break;
     }
     res.tree_size = free_index;
@@ -293,18 +373,6 @@ PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typ
     std::vector<float> h_nodes(MAX_SAMPLES * dim);
     cudaMemcpy(h_parents.data(), parents, MAX_SAMPLES * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_nodes.data(), nodes, MAX_SAMPLES * config_size, cudaMemcpyDeviceToHost);
-
-    // change representation of RRT nodes from flattened vector to vector of Configurations
-    // typename Robot::Configuration cfg;
-    // for (int i = 0; i < MAX_SAMPLES; i++) {
-    //     for (int j = 0; j < dim; j++) {
-    //         cfg[j] = h_nodes[i * dim + j];
-    //     }
-    //     res.nodes.emplace_back(cfg);
-    // }
-
-    // compute the path
-    // std::vector<int> path;
     
     if (done) {
         // get the index of the goal we found in the goals array
