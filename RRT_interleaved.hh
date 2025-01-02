@@ -7,32 +7,6 @@
 #include "Robots.hh"
 #include "collision/environment.hh"
 
-
-/* nearest neighbors stuff */
-// using Metric = nigh::LPMetric<2>;
-// using Space = nigh::metric::Space<Configuration, Metric>;
-// using State = typename Configuration;
-
-// struct NNNode {
-//     Configuration config;
-//     std::size_t idx;
-// };
-
-// struct KeyFn {
-//     const State& operator() (const NNNode& n) const {
-//         return n;
-//     }
-// };
-
-// using NN = nigh::Nigh<
-//     NNNode,
-//     Space,
-//     KeyFn,
-//     nigh::Concurrent,
-//     nigh::KDTreeBatch<>
-// >;
-/* end nearest neighbors stuff */
-
 template <typename Robot>
 struct PlannerResult {
     bool solved = false;
@@ -62,8 +36,21 @@ inline std::size_t get_elapsed_nanoseconds(const std::chrono::time_point<std::ch
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
 }
 
-template <typename Robot>
-PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goal, ppln::collision::Environment<float> &environment);
+namespace RRT {
+    template <typename Robot>
+    PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goal, ppln::collision::Environment<float> &environment);
+    // template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float> &environment);
+    // template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float> &environment);
+}
 
-extern template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float> &environment);
-extern template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float> &environment);
+namespace RRTC {
+    template <typename Robot>
+    PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goal, ppln::collision::Environment<float> &environment);
+    // template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float> &environment);
+    // template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float> &environment);
+}
+
+namespace RRT_new {
+    template <typename Robot>
+    PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goal, ppln::collision::Environment<float> &environment);
+}

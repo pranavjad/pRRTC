@@ -13,7 +13,7 @@ using namespace ppln::collision;
 std::ifstream f("panda_problems.json");
 
 Environment<float> problem_dict_to_env(const json& problem, const std::string& name) {
-    Environment<float> env;
+    Environment<float> env{};
     
     std::vector<Sphere<float>> spheres;
     std::vector<Capsule<float>> capsules;
@@ -62,7 +62,7 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
         auto cuboid = factory::cuboid::flat(
             position[0], position[1], position[2],
             orientation[0], orientation[1], orientation[2],
-            half_extents[0], half_extents[1], half_extents[2]  // Fixed typo in half_extends
+            half_extents[0], half_extents[1], half_extents[2]
         );
         cuboid.name = obj["name"];
         cuboids.push_back(cuboid);
@@ -72,36 +72,39 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
         env.spheres = new Sphere<float>[spheres.size()];
         std::copy(spheres.begin(), spheres.end(), env.spheres);
         env.num_spheres = spheres.size();
-    } else {
-        env.spheres = nullptr;
-        env.num_spheres = 0;
     }
+    // else {
+    //     env.spheres = nullptr;
+    //     env.num_spheres = 0;
+    // }
 
     if (!capsules.empty()) {
         env.capsules = new Capsule<float>[capsules.size()];
         std::copy(capsules.begin(), capsules.end(), env.capsules);
         env.num_capsules = capsules.size();
-    } else {
-        env.capsules = nullptr;
-        env.num_capsules = 0;
     }
+    // else {
+    //     env.capsules = nullptr;
+    //     env.num_capsules = 0;
+    // }
 
     if (!cuboids.empty()) {
         env.cuboids = new Cuboid<float>[cuboids.size()];
         std::copy(cuboids.begin(), cuboids.end(), env.cuboids);
         env.num_cuboids = cuboids.size();
-    } else {
-        env.cuboids = nullptr;
-        env.num_cuboids = 0;
     }
+    // else {
+    //     env.cuboids = nullptr;
+    //     env.num_cuboids = 0;
+    // }
 
     // Initialize other pointers to nullptr
-    env.z_aligned_capsules = nullptr;
-    env.num_z_aligned_capsules = 0;
-    env.cylinders = nullptr;
-    env.num_cylinders = 0;
-    env.z_aligned_cuboids = nullptr;
-    env.num_z_aligned_cuboids = 0;
+    // env.z_aligned_capsules = nullptr;
+    // env.num_z_aligned_capsules = 0;
+    // env.cylinders = nullptr;
+    // env.num_cylinders = 0;
+    // env.z_aligned_cuboids = nullptr;
+    // env.num_z_aligned_cuboids = 0;
 
     return env;
 }
@@ -111,24 +114,36 @@ inline void describe(std::vector<PlannerResult<robots::Panda>> &results) {
 
 }
 
-
 int main() {
     json all_data = json::parse(f);
     json problems = all_data["problems"];
     using Configuration = robots::Panda::Configuration;
     int failed = 0;
     std::map<std::string, std::vector<PlannerResult<robots::Panda>>> results;
-    for (auto& [name, pset] : problems.items()) {
+    std::vector<std::string> prob_names = {
+        "bookshelf_small",
+        "bookshelf_tall",
+        "bookshelf_thin",
+        "box",
+        "cage",
+        "table_pick",
+        "table_under_pick",
+        "bookshelf_small"
+    };
+    for (auto& name : prob_names) {
         std::cout << name << "\n";
+        auto pset = problems[name];
         for (int i = 0; i < pset.size(); i++) {
+            std::cout << "idx: " << i << "\n";
             json data = pset[i];
             if (not data["valid"]) {
                 continue;
             }
             auto env = problem_dict_to_env(data, name);
+            printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
             Configuration start = data["start"];
             std::vector<Configuration> goals = data["goals"];
-            auto result = solve<robots::Panda>(start, goals, env);
+            auto result = RRT_new::solve<robots::Panda>(start, goals, env);
             if (not result.solved) {
                 failed ++;
                 std::cout << "failed " << name << std::endl;
@@ -144,7 +159,7 @@ int main() {
         }
     }
 
-    for (auto& [name, pset] : problems.items()) {
+    for (auto& name : prob_names) {
         std::cout << name << std::endl;
 
         // calculate stats for cost 

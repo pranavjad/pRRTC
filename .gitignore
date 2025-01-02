@@ -1,2 +1,6 @@
 build
 problems.pkl
+*.out
+*.json
+Pipfile
+Pipfile.lock

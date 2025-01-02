@@ -6,22 +6,31 @@
 using namespace ppln;
 
 
-// void sphere_test() {
-//     std::vector<float> obstacles = {
-//          5.0,   5.0,   5.0,   1.0,
-//          50.0,  50.0,  50.0,  0.1,
-//         -10.0, -25.0, -40.0,  0.1
-//     };
+void sphere_test() {
+    std::vector<collision::Sphere<float>> obstacles = {
+        collision::Sphere<float>{0.0,  0.0,  0.0,  3.0},
+    };
 
-//     ppln::collision::Environment env;
-//     env.spheres = obstacles.data();
-//     env.num_spheres = (int)(obstacles.size() / 4);
+    ppln::collision::Environment<float> env;
+    env.spheres = new collision::Sphere<float>[obstacles.size()];
+    std::copy(obstacles.begin(), obstacles.end(), env.spheres);
+    env.num_spheres = (int)(obstacles.size());
+    env.capsules = nullptr;
+    env.num_capsules = 0;
+    env.cuboids = nullptr;
+    env.num_cuboids = 0;
+    env.z_aligned_capsules = nullptr;
+    env.num_z_aligned_capsules = 0;
+    env.cylinders = nullptr;
+    env.num_cylinders = 0;
+    env.z_aligned_cuboids = nullptr;
+    env.num_z_aligned_cuboids = 0;
 
-//     robots::Sphere::Configuration start = {0.1, 0.2, 0.1};
-//     std::vector<robots::Sphere::Configuration> goals = {{10.0, 10.0, 10.0}};
+    robots::Sphere::Configuration start = {-4.0, -4.0, -4.0};
+    std::vector<robots::Sphere::Configuration> goals = {{4.0, 4.0, 4.0}};
 
-//     solve<robots::Sphere>(start, goals, env);
-// }
+    auto res = RRT_new::solve<robots::Sphere>(start, goals, env);
+}
 
 void panda_test() {
     // obstacles for sphere cage
@@ -43,17 +52,28 @@ void panda_test() {
     };
 
     ppln::collision::Environment<float> env;
-    env.spheres = obstacles.data();
-    env.num_spheres = (int)(obstacles.size() / 4);
+    env.spheres = new collision::Sphere<float>[obstacles.size()];
+    std::copy(obstacles.begin(), obstacles.end(), env.spheres);
+    env.num_spheres = (int)(obstacles.size());
+    env.capsules = nullptr;
+    env.num_capsules = 0;
+    env.z_aligned_capsules = nullptr;
+    env.num_z_aligned_capsules = 0;
+    env.cylinders = nullptr;
+    env.num_cylinders = 0;
+    env.cuboids = nullptr;
+    env.num_cuboids = 0;
+    env.z_aligned_cuboids = nullptr;
+    env.num_z_aligned_cuboids = 0;
 
     robots::Panda::Configuration start = {0., -0.785, 0., -2.356, 0., 1.571, 0.785};
     std::vector<robots::Panda::Configuration> goals = {{2.35, 1., 0., -0.8, 0, 2.5, 0.785}};
 
-    auto res = solve<robots::Panda>(start, goals, env);
+    auto res = RRT::solve<robots::Panda>(start, goals, env);
 }
 
 int main() {
-    // sphere_test();
-    panda_test();
+    sphere_test();
+    // panda_test();
 }
 

@@ -1,11 +1,10 @@
 #include "RRT_interleaved.hh"
 #include "Robots.hh"
 #include "utils.cuh"
-// #include "collision_backends.cu"
 #include "collision/environment.hh"
 
-// #include <curand.h>
-// #include <curand_kernel.h>
+#include <curand.h>
+#include <curand_kernel.h>
 
 #include <vector>
 #include <iostream>
@@ -15,10 +14,10 @@
 /*
 Parallelized RRT with parallelized collision checking.
 Interleaved strategy: sample states in parallel, then check edges in parallel, then repeat.
+sample states in parallel, check edges in parallel, grow tree in parallel, check if the new configs can reach the goal in parallel
 */
 
-namespace RRT {
-
+namespace RRT_new {
     // Constants
     __constant__ float primes[16] = {
         3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f, 23.f,
@@ -145,15 +144,14 @@ namespace RRT {
     };
     __device__ int set_cfg_idx = 0;
 
-
     __device__ int atomic_free_index;
-    __device__ bool reached_goal = false;
-    __device__ int found_goal_idx;
+    __device__ int reached_goal = 0;
+    __device__ int reached_goal_idx = -1;
+    __device__ int goal_parent_idx = -1;
 
     constexpr int MAX_SAMPLES = 1000000;
     constexpr int MAX_ITERS = 1000000;
-    constexpr int COORD_BOUND = 3.0;
-    constexpr int NUM_NEW_CONFIGS = 2;
+    constexpr int NUM_NEW_CONFIGS = 1;
     constexpr int GRANULARITY = 256;
     constexpr float RRT_RADIUS = 1.0;
 
@@ -169,288 +167,15 @@ namespace RRT {
         printf("\n");
     }
 
-    // granularity = number of interpolated points to check along each edge
-    // total number of threads we need is edges * granularity
-    // Each block is of size granularity and it checks one edge. Each thread in the block checks a consecutive interpolated point along the edge.
-    template <typename Robot>
-    __global__ void validate_edges(float *new_configs, int *new_config_parents, float *new_config_dist, unsigned int *cc_result, int *num_colliding_edges, ppln::collision::Environment<float> *env, float *nodes) {
-        static constexpr auto dim = Robot::dimension;
-        int tid_in_block = threadIdx.x;
-        int bid = blockIdx.x;
-        // total_threads = num_samples * granularity;
-        if (bid >= NUM_NEW_CONFIGS) return;
-        if (tid_in_block >= GRANULARITY) return;
-        if (bid == 0) return; // temporarily turn off goal thread
-        if (bid == 0 and tid_in_block == 0) {
-            printf("device num spheres, capsules, cuboids: %d, %d, %d\n", env->num_spheres, env->num_capsules, env->num_cuboids);
-        }
-        __shared__ float delta[dim];
-        __shared__ float shared_edge_start[dim];
-        if (tid_in_block == 0) {
-            float *edge_start = &nodes[new_config_parents[bid] * dim];
-            float *edge_end = &new_configs[bid * dim];
-            for (int i = 0; i < dim; i++) {
-                shared_edge_start[i] = edge_start[i];
-                delta[i] = (edge_end[i] - edge_start[i]) / (float) GRANULARITY;;
-            }
-            if (bid == 0) {
-                printf("edge end: ");
-                print_config(edge_end, dim);
-            }
-        }
-        __syncthreads();
-        if (bid == 0 and tid_in_block == 0) {
-            printf("edge start: ");
-            print_config(shared_edge_start, dim);
-            printf("projected edge end: ");
-            for (int i = 0; i < dim; i++) {
-                printf("%f ", shared_edge_start[i] + (GRANULARITY * delta[i]));
-            }
-            printf("\n");
-        }
-        // calculate the configuration this thread will be checking
-        float config[dim];
-        for (int i = 0; i < dim; i++) {
-            config[i] = shared_edge_start[i] + ((tid_in_block + 1) * delta[i]);
-        }
-       
-        if (bid == 0 and tid_in_block == 0) {
-            printf("config being validated: ");
-            print_config(config, dim);
-        }
-        __syncthreads();
-        // check for collision
-        bool config_in_collision = not ppln::collision::fkcc<Robot>(config, env);
-        float test[] = {-1.326833, 1.440717, 1.681937, -1.136168, -0.050213, 3.499313, 1.902088 };
-        if (bid == 0 and tid_in_block == 0) {
-            printf("first point in edge colliding?: %d\n", config_in_collision);
-        }
-        __syncthreads();
-        if (bid == 0 and tid_in_block == 255) {
-            printf("last config in edge: (");
-            print_config(config, dim);
-            printf(")last point in edge colliding?: %d\n", config_in_collision);
-        }
-        __syncthreads();
-        // if (bid == 0 and (not config_in_collision)) {
-        //     printf("no collision: thread %d\n", tid_in_block);
-        // }
-        // if (bid == 0 and config_in_collision) {
-        //     printf("collision: thread %d\n", tid_in_block);
-        // }
-        atomicOr(&cc_result[bid], config_in_collision ? 1u : 0u);
-    }
-
-
-    // initialize cuda random
-    // __global__ void init_rng(curandState* states, unsigned long seed) {
-    //     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    //     curand_init(seed, idx, 0, &states[idx]);
-    // }
-
-    // each thread is responsible for finding a new edge to check
-    // sample a new state -> connect it to nearest neighbor in our tree
-    template <typename Robot>
-    __global__ void sample_edges(float *new_configs, int *new_config_parents, float *new_config_dist, float *nodes, float *goal_configs, int num_goals, curandState *rng_states, HaltonState<Robot> *halton_states) {
-        // printf("here!");
-        static constexpr auto dim = Robot::dimension;
-        int tid = blockIdx.x * blockDim.x + threadIdx.x;
-        if (tid >= NUM_NEW_CONFIGS) return;
-        curandState local_rng_state = rng_states[tid];
-
-        float *new_config = &new_configs[tid * dim];
-        float config[dim];
-        // if this is the first thread always sample a random goal
-        if (tid == 0) {
-            int goal_idx = (int)(num_goals * curand_uniform(&local_rng_state));
-            float *goal_config = goal_configs + (dim * goal_idx);
-            for (int i = 0; i < dim; i++) {
-                config[i] = goal_config[i];
-            }
-            // printf("goal_config: ");
-            // print_config(goal_config, dim);
-        }
-        // otherwise sample a random config
-        else {
-            // float p = curand_uniform(&local_rng_state);
-            // rng_states[tid] = local_rng_state;
-            // if (p < 0.05) {
-            //     printf("sampled goal!\n");
-            //     int goal_idx = 0;
-            //     float *goal_config = goal_configs + (dim * goal_idx);
-            //     for (int i = 0; i < dim; i++) {
-            //         config[i] = goal_config[i];
-            //     }
-            // }
-                // for (int i = 0; i < dim; i++) {
-                //     config[i] = curand_uniform(&local_rng_state);
-                // }
-                // halton_next(halton_states[tid], config);
-                for (int i = 0; i < dim; i++) {
-                    config[i] = set_configs[set_cfg_idx * dim + i];
-                }
-                set_cfg_idx++;
-            
-            if (tid == 1) {printf("config before scaling: "); print_config(config, dim);}
-            
-            ppln::device_utils::scale_configuration<Robot>(config);
-            if (tid == 1) {printf("config after scaling: "); print_config(config, dim);}
-        }
-        __syncthreads();
-        rng_states[tid] = local_rng_state;
-        
-        // Track both nearest and second nearest
-        float min_dist = 1000000000.0;
-        float second_min_dist = 1000000000.0;
-        int nearest_idx = -1;
-        int second_nearest_idx = -1;
-
-        float dist;
-    
-        for (int i = 0; i < atomic_free_index; i++) {
-            dist = device_utils::l2_dist(&nodes[i * dim], config, dim);
-            // printf("dist: %f\n", dist);
-            if (dist < min_dist) {
-                // Current nearest becomes second nearest
-                second_min_dist = min_dist;
-                second_nearest_idx = nearest_idx;
-                // Update nearest
-                min_dist = dist;
-                nearest_idx = i;
-            } else if (dist < second_min_dist) {
-                // Update second nearest
-                second_min_dist = dist;
-                second_nearest_idx = i;
-            }
-        }
-
-        if (tid == 0 and nearest_idx != -1 and second_nearest_idx != -1) {
-            // printf("\n=== Nearest Neighbor Debug Info ===\n");
-            // printf("free_index: %d\n", atomic_free_index);
-            // printf("dist to goal: %f\n", min_dist);
-            // printf("nearest idx to goal: %d\n", nearest_idx);
-            // printf("second nearest dist: %f\n", second_min_dist);
-            // printf("second nearest idx: %d\n", second_nearest_idx);
-            
-            // printf("nearest node (id: %d): ", nearest_idx);
-            // print_config(&nodes[nearest_idx * dim], dim);
-            // printf("second nearest node (id: %d): ", second_nearest_idx);
-            // print_config(&nodes[second_nearest_idx * dim], dim);
-            
-            // // Print the vector from nearest to goal
-            // printf("vector from nearest to goal:\n");
-            // for (int i = 0; i < dim; i++) {
-            //     printf("%f ", config[i] - nodes[nearest_idx * dim + i]);
-            // }
-            // printf("\n");
-        }
-        // float min_dist = 1000000000.0;
-        // int nearest_idx = -1;
-
-        // float dist;
-
-        // for (int i = 0; i < atomic_free_index; i++) {
-        //     dist = device_utils::l2_dist(&nodes[i * dim], config, dim);
-        //     if (dist < min_dist) {
-        //         nearest_idx = i;
-        //         min_dist = dist;
-        //     }
-        // }
-
-        if (tid == 0) {
-            printf("free_index: %d\n", atomic_free_index);
-            printf("dist to goal: %f\n", min_dist);
-            printf("neares idx to goal: %d\n", nearest_idx);
-            return;
-        }
-
-        // keep it within the rrt range
-        float scale = min(1.0f, RRT_RADIUS / min_dist);
-        float *nearest_node = &nodes[nearest_idx * dim];
-        float vec[dim];
-        for (int i = 0; i < dim; i++) {
-            vec[i] = (config[i] - nearest_node[i]) * scale;
-        }
-
-        for (int i = 0; i < dim; i++) {
-            new_config[i] = nearest_node[i] + vec[i];
-        }
-        if (tid == 1) {
-            printf("nearest (id: %d): ", nearest_idx);
-            print_config(nearest_node, dim);
-            printf("nearest + vec: ");
-            print_config(new_config, dim);
-            printf("config: ");
-            print_config(config, dim);
-        }
-        __syncthreads();
-        min_dist *= scale;
-        
-        new_config_dist[tid] = min_dist;
-
-        // set the parent of the new config
-        new_config_parents[tid] = nearest_idx;
-    }
-
-    // grow the RRT tree after we figure out what edges have no collisions
-    // each thread is responsible for adding one edge to the tree
-    template <typename Robot>
-    __global__ void grow_tree(float *new_configs, int *new_config_parents, float *new_config_dist, unsigned int *cc_result, float *nodes, int *parents, int *num_colliding_edges, float *goal_configs, int num_goals) {
-        static constexpr auto dim = Robot::dimension;
-        int tid = blockIdx.x * blockDim.x + threadIdx.x;
-        if (tid >= NUM_NEW_CONFIGS) return;
-        if (tid == 0) {
-            return;
-            print_config(&new_configs[0], dim);
-            int parent = new_config_parents[0];
-            while (parent != parents[parent]) {
-                print_config(&nodes[parent * dim], dim);
-                parent = parents[parent];
-            }
-            print_config(&nodes[parent * dim], dim);
-        }
-        if (cc_result[tid] != 0) return;  // this edge had a collision, don't add it
-
-        // The first edge is always to the goal so if we get here, we need to check if we reached the goal.
-        if (tid == 1) {
-            float dist_to_goal;
-            for (int i = 0; i < num_goals; i++) {
-                dist_to_goal = device_utils::l2_dist(&new_configs[1 * dim], &goal_configs[i * dim], dim);
-                printf("dist_to_goal: %f\n", dist_to_goal);
-                if (dist_to_goal < 0.0001) {
-                    reached_goal = true;
-                    found_goal_idx = i;
-                    return;
-                }
-            }
-        }
-
-        // Atomically get the next free index
-        int my_index = atomicAdd(&atomic_free_index, 1);
-        if (my_index >= MAX_SAMPLES) return;
-        
-        // Copy the configuration to the nodes array
-        for (int i = 0; i < dim; i++) {
-            nodes[my_index * dim + i] = new_configs[tid * dim + i];
-        }
-        // if (my_index == 482) {
-        //     printf("just added nodes[482]: \n");
-        //     print_config(&nodes[482 * dim], dim);
-        // }
-        
-        // Set the parent
-        parents[my_index] = new_config_parents[tid];
-    }
-
     inline void reset_device_variables() {
         int zero = 0;
         bool false_val = false;
         
         cudaMemcpyToSymbol(atomic_free_index, &zero, sizeof(int));
-        cudaMemcpyToSymbol(reached_goal, &false_val, sizeof(bool));
-        cudaMemcpyToSymbol(found_goal_idx, &zero, sizeof(int));
+        cudaMemcpyToSymbol(reached_goal, &zero, sizeof(int));
+        cudaMemcpyToSymbol(reached_goal_idx, &zero, sizeof(int));
+        cudaMemcpyToSymbol(goal_parent_idx, &zero, sizeof(int));
     }
-
 
     inline void setup_environment_on_device(ppln::collision::Environment<float> *&d_env, 
                                       const ppln::collision::Environment<float> &h_env) {
@@ -589,10 +314,223 @@ namespace RRT {
         cudaFree(d_env);
     }
 
+    // granularity = number of interpolated points to check along each edge
+    // total number of threads we need is edges * granularity
+    // Each block is of size granularity and it checks one edge. Each thread in the block checks a consecutive interpolated point along the edge.
+    template <typename Robot>
+    __global__ void validate_edges(float *new_configs, int *new_config_parents, unsigned int *cc_result, int *num_colliding_edges, ppln::collision::Environment<float> *env, float *nodes) {
+        static constexpr auto dim = Robot::dimension;
+        int tid_in_block = threadIdx.x;
+        int bid = blockIdx.x;
+        // total_threads = num_samples * granularity;
+        if (bid >= NUM_NEW_CONFIGS) return;
+        if (tid_in_block >= GRANULARITY) return;
+        // if (bid == 0 and tid_in_block == 0) {
+        //     printf("device num spheres, capsules, cuboids: %d, %d, %d\n", env->num_spheres, env->num_capsules, env->num_cuboids);
+        // }
+        __shared__ float delta[dim];
+        __shared__ float shared_edge_start[dim];
+        if (tid_in_block == 0) {
+            float *edge_start = &nodes[new_config_parents[bid] * dim];
+            float *edge_end = &new_configs[bid * dim];
+            for (int i = 0; i < dim; i++) {
+                shared_edge_start[i] = edge_start[i];
+                delta[i] = (edge_end[i] - edge_start[i]) / (float) GRANULARITY;;
+            }
+            // if (bid == 0) {
+            //     printf("edge end: ");
+            //     print_config(edge_end, dim);
+            // }
+        }
+        __syncthreads();
+        // if (bid == 0 and tid_in_block == 0) {
+        //     printf("edge start: ");
+        //     print_config(shared_edge_start, dim);
+        //     printf("projected edge end: ");
+        //     for (int i = 0; i < dim; i++) {
+        //         printf("%f ", shared_edge_start[i] + (GRANULARITY * delta[i]));
+        //     }
+        //     printf("\n");
+        // }
+        // calculate the configuration this thread will be checking
+        float config[dim];
+        for (int i = 0; i < dim; i++) {
+            config[i] = shared_edge_start[i] + ((tid_in_block + 1) * delta[i]);
+        }
+       
+        // if (bid == 0 and tid_in_block == 0) {
+        //     printf("config being validated: ");
+        //     print_config(config, dim);
+        // }
+        // __syncthreads();
+        // check for collision
+        bool config_in_collision = not ppln::collision::fkcc<Robot>(config, env);
+        // if (bid == 0 and tid_in_block == 0) {
+        //     printf("first point in edge colliding?: %d\n", config_in_collision);
+        // }
+        // __syncthreads();
+        // if (bid == 0 and tid_in_block == 255) {
+        //     printf("last config in edge: (");
+        //     print_config(config, dim);
+        //     printf(")last point in edge colliding?: %d\n", config_in_collision);
+        // }
+        // __syncthreads();
+        // if (bid == 0 and (not config_in_collision)) {
+        //     printf("no collision: thread %d\n", tid_in_block);
+        // }
+        // if (bid == 0 and config_in_collision) {
+        //     printf("collision: thread %d\n", tid_in_block);
+        // }
+        atomicOr(&cc_result[bid], config_in_collision ? 1u : 0u);
+    }
+
+
+    // initialize cuda random
+    // __global__ void init_rng(curandState* states, unsigned long seed) {
+    //     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    //     curand_init(seed, idx, 0, &states[idx]);
+    // }
+
+    // each thread is responsible for finding a new edge to check
+    // sample a new state -> connect it to nearest neighbor in our tree
+    template <typename Robot>
+    __global__ void sample_edges(float *new_configs, int *new_config_parents, float *nodes, float *goal_configs, int num_goals, curandState *rng_states, HaltonState<Robot> *halton_states) {
+        // printf("here!");
+        static constexpr auto dim = Robot::dimension;
+        int tid = blockIdx.x * blockDim.x + threadIdx.x;
+        if (tid >= NUM_NEW_CONFIGS) return;
+        curandState local_rng_state = rng_states[tid];
+
+        float *new_config = &new_configs[tid * dim];
+        float config[dim];
+        
+        for (int i = 0; i < dim; i++) {
+            config[i] = curand_uniform(&local_rng_state);
+        }
+        // halton_next(halton_states[tid], config);
+        // for (int i = 0; i < dim; i++) {
+        //     config[i] = set_configs[set_cfg_idx * dim + i];
+        // }
+        // set_cfg_idx++;
+    
+        // if (tid == 0) {printf("config before scaling: "); print_config(config, dim);}
+        
+        ppln::device_utils::scale_configuration<Robot>(config);
+        // if (tid == 0) {printf("config after scaling: "); print_config(config, dim);}
+        // __syncthreads();
+        rng_states[tid] = local_rng_state;
+        
+        // Track both nearest and second nearest
+        float min_dist = 1000000000.0;
+        int nearest_idx = -1;
+
+        float dist;
+    
+        for (int i = 0; i < atomic_free_index; i++) {
+            dist = device_utils::l2_dist(&nodes[i * dim], config, dim);
+            // printf("dist: %f\n", dist);
+            if (dist < min_dist) {
+                min_dist = dist;
+                nearest_idx = i;
+            }
+        }
+
+        // if (tid == 0) {
+        //     printf("free_index: %d\n", atomic_free_index);
+        //     printf("dist to goal: %f\n", min_dist);
+        //     printf("neares idx to goal: %d\n", nearest_idx);
+        // }
+
+        // keep it within the rrt range
+        float scale = min(1.0f, RRT_RADIUS / min_dist);
+        float *nearest_node = &nodes[nearest_idx * dim];
+        float vec[dim];
+        for (int i = 0; i < dim; i++) {
+            vec[i] = (config[i] - nearest_node[i]) * scale;
+        }
+
+        for (int i = 0; i < dim; i++) {
+            new_config[i] = nearest_node[i] + vec[i];
+        }
+        // if (tid == 0) {
+        //     printf("nearest (id: %d): ", nearest_idx);
+        //     print_config(nearest_node, dim);
+        //     printf("nearest + vec: ");
+        //     print_config(new_config, dim);
+        //     printf("config: ");
+        //     print_config(config, dim);
+        // }
+        // __syncthreads();
+        min_dist *= scale;
+        
+
+        // set the parent of the new config
+        new_config_parents[tid] = nearest_idx;
+    }
+
+    // grow the RRT tree after we figure out what edges have no collisions
+    // each thread is responsible for adding one edge to the tree
+    template <typename Robot>
+    __global__ void grow_tree(float *new_configs, int *new_config_parents, unsigned int *cc_result, float *nodes, int *parents, int *num_colliding_edges, float *goal_configs, int num_goals, int *new_config_idxs) {
+        static constexpr auto dim = Robot::dimension;
+        int tid = blockIdx.x * blockDim.x + threadIdx.x;
+        if (tid >= NUM_NEW_CONFIGS) return;
+        if (cc_result[tid] != 0) return;  // this edge had a collision, don't add it
+
+        // Atomically get the next free index
+        int my_index = atomicAdd(&atomic_free_index, 1);
+        if (my_index >= MAX_SAMPLES) return;
+
+        new_config_idxs[tid] = my_index;
+        // Copy the configuration to the nodes array
+        for (int i = 0; i < dim; i++) {
+            nodes[my_index * dim + i] = new_configs[tid * dim + i];
+        }
+        
+        // Set the parent
+        parents[my_index] = new_config_parents[tid];
+    }
+
+    // Each thread will check one edge from a new_config to a goal
+    template <typename Robot>
+    __global__ void check_goal(float *new_configs, float *goal_configs, int num_goals, ppln::collision::Environment<float> *env, float *nodes, int *parents, unsigned int *cc_result, int *new_config_idxs) {
+        static constexpr auto dim = Robot::dimension;
+        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+        int goal_idx = idx / NUM_NEW_CONFIGS;
+        int config_idx = idx % NUM_NEW_CONFIGS; 
+        if (goal_idx >= num_goals || config_idx >= NUM_NEW_CONFIGS) return;
+        if (cc_result[config_idx] != 0) return;
+
+        float delta[dim];
+        float config[dim];
+        float *new_config = &new_configs[config_idx * dim];
+        float *goal = &goal_configs[goal_idx * dim];
+        for (int i = 0; i < dim; i++) {
+            delta[i] = (goal[i] - new_config[i]) / (float) GRANULARITY;
+            config[i] = new_config[i] + delta[i];
+        }
+
+        bool edge_valid = true;
+        for (int i = 0; i < GRANULARITY; i++) {
+            edge_valid &= ppln::collision::fkcc<Robot>(config, env);
+            for (int i = 0; i < dim; i++) {
+                config[i] += delta[i];
+            }
+        }
+        // if (edge_valid) {
+        //     printf("edge valid for new_config %d and goal %d\n", new_config_idxs[config_idx], goal_idx);
+        // }
+        atomicCAS(&reached_goal, 0, edge_valid);
+        atomicCAS(&reached_goal_idx, -1, goal_idx * edge_valid - (!edge_valid));
+        atomicCAS(&goal_parent_idx, -1, new_config_idxs[config_idx] * edge_valid - (!edge_valid));
+    }
+
+
+
     template <typename Robot>
     PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &h_environment) {
         // printCUDADeviceInfo();
-        printf("num spheres, capsules, cuboids: %d, %d, %d\n", h_environment.num_spheres, h_environment.num_capsules, h_environment.num_cuboids);
+        // printf("num spheres, capsules, cuboids: %d, %d, %d\n", h_environment.num_spheres, h_environment.num_capsules, h_environment.num_cuboids);
         static constexpr auto dim = Robot::dimension;
         for (int i = 0; i < dim; i++) {
             printf("%f ", start[i]);
@@ -653,10 +591,9 @@ namespace RRT {
         cudaMalloc(&new_configs, NUM_NEW_CONFIGS * config_size);
         int *new_config_parents;
         cudaMalloc(&new_config_parents, NUM_NEW_CONFIGS * sizeof(int));
-        float *new_config_dist;
-        cudaMalloc(&new_config_dist, NUM_NEW_CONFIGS * sizeof(float));
-        cudaMemset(new_config_dist, 0, NUM_NEW_CONFIGS * sizeof(float));
         cudaCheckError(cudaGetLastError());
+        int *new_config_idxs;
+        cudaMalloc(&new_config_idxs, NUM_NEW_CONFIGS * sizeof(int));
 
         // create an array to hold the result of collision check for each new edge
         unsigned int *cc_result;
@@ -676,30 +613,44 @@ namespace RRT {
         // cudaMemcpy(env, &h_environment, sizeof(env), cudaMemcpyHostToDevice);
         setup_environment_on_device(env, h_environment);
         cudaCheckError(cudaGetLastError());
-        bool done = false;
+        int done = 0;
+
+        // calculate launch configuration for check_goals
+        int totalPairs = num_goals * NUM_NEW_CONFIGS;
+        int threadsPerBlock1 = 256;
+        int numBlocks1 = (totalPairs + threadsPerBlock1 - 1) / threadsPerBlock1;
+        // std::cout << "numBlocks: " << numBlocks << "\n" << "BLOCK_SIZE: " << BLOCK_SIZE << "\n";
+        // std::cout << "numBlocks1: " << numBlocks1 << "\n" << "threadsPerBlock1: " << threadsPerBlock1 << "\n";
+
+
         // main RRT loop
         while (iter++ < MAX_ITERS && free_index < MAX_SAMPLES) {
             std::cout << "iter: " << iter << std::endl;
             // sample configurations and get edges to be checked
-            sample_edges<Robot><<<numBlocks, BLOCK_SIZE>>>(new_configs, new_config_parents, new_config_dist, nodes, goal_configs, num_goals, rng_states, halton_states);
+            sample_edges<Robot><<<numBlocks, BLOCK_SIZE>>>(new_configs, new_config_parents, nodes, goal_configs, num_goals, rng_states, halton_states);
             cudaCheckError(cudaGetLastError());
             cudaDeviceSynchronize();
             // collision check all the edges
             cudaMemset(cc_result, 0, NUM_NEW_CONFIGS * sizeof(unsigned int));
             // std::cout << "validate\n";
-            validate_edges<Robot><<<NUM_NEW_CONFIGS, GRANULARITY>>>(new_configs, new_config_parents, new_config_dist, cc_result, num_colliding_edges, env, nodes);
+            validate_edges<Robot><<<NUM_NEW_CONFIGS, GRANULARITY>>>(new_configs, new_config_parents, cc_result, num_colliding_edges, env, nodes);
             cudaCheckError(cudaGetLastError());
             cudaDeviceSynchronize();
             // add all the new edges to the tree
             // std::cout << "grow\n";
-            grow_tree<Robot><<<numBlocks, BLOCK_SIZE>>>(new_configs, new_config_parents, new_config_dist, cc_result, nodes, parents, num_colliding_edges, goal_configs, num_goals);
+            grow_tree<Robot><<<numBlocks, BLOCK_SIZE>>>(new_configs, new_config_parents, cc_result, nodes, parents, num_colliding_edges, goal_configs, num_goals, new_config_idxs);
+            cudaCheckError(cudaGetLastError());
+            cudaDeviceSynchronize();
+
+            // check whether each new configuration added to the tree can reach the goal
+            check_goal<Robot><<<numBlocks1, threadsPerBlock1>>>(new_configs, goal_configs, num_goals, env, nodes, parents, cc_result, new_config_idxs);
             cudaCheckError(cudaGetLastError());
             cudaDeviceSynchronize();
             // std::cout << "end loop\n";
             // update free index
             cudaMemcpyFromSymbol(&free_index, atomic_free_index, sizeof(int), 0, cudaMemcpyDeviceToHost);
             cudaCheckError(cudaGetLastError());
-            cudaMemcpyFromSymbol(&done, reached_goal, sizeof(bool), 0, cudaMemcpyDeviceToHost);
+            cudaMemcpyFromSymbol(&done, reached_goal, sizeof(int), 0, cudaMemcpyDeviceToHost);
             // cudaCheckError(cudaGetLastError());
             if (done) break;
         }
@@ -716,12 +667,12 @@ namespace RRT {
             printf("done!\n");
             // get the index of the goal we found in the goals array
             int h_goal_idx;
-            cudaMemcpyFromSymbol(&h_goal_idx, found_goal_idx, sizeof(int), 0, cudaMemcpyDeviceToHost);
+            cudaMemcpyFromSymbol(&h_goal_idx, reached_goal_idx, sizeof(int), 0, cudaMemcpyDeviceToHost);
             std::cout << "Found Goal: " << h_goal_idx << std::endl;
             res.solved = true;
             // get parent at position 0 in new_config_parents, because that will be the parent of the goal
             int parent_idx = -1;
-            cudaMemcpy(&parent_idx, new_config_parents, sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpyFromSymbol(&parent_idx, goal_parent_idx, sizeof(int), 0, cudaMemcpyDeviceToHost);
             assert(parent_idx != -1);
             typename Robot::Configuration cfg;
             typename Robot::Configuration cfg_parent;
@@ -763,3 +714,6 @@ namespace RRT {
     template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&);
     template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&);
 }
+
+
+
