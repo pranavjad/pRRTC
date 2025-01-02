@@ -117,8 +117,9 @@ int main() {
     using Configuration = robots::Panda::Configuration;
     int failed = 0;
     std::map<std::string, std::vector<PlannerResult<robots::Panda>>> results;
-    std::string name = "cage";
-    int problem_idx = 13;
+    // cage 13, 
+    std::string name = "table_pick";
+    int problem_idx = 100;
     auto pset = problems[name];
     json data = pset[problem_idx - 1];
     if (not data["valid"]) {
