@@ -202,63 +202,35 @@ namespace ppln::device_utils {
 
     __device__ inline bool sphere_environment_in_collision(ppln::collision::Environment<float> *env, float sx_, float sy_, float sz_, float sr_)
     {
-        // check for collision with all spheres in environment
-        // printf("here1");
-        for (unsigned int i = 0; i < env->num_spheres; i++)
+        const float rsq = sr_ * sr_;
+        bool in_collision = false;
+
+        for (unsigned int i = 0; i < env->num_spheres && !in_collision; i++)
         {
-            // printf("here2");
-            if (
-                sphere_sphere_sql2(env->spheres[i], sx_, sy_, sz_, sr_) < 0
-            )
-            {
-                return true;
-            }
+            in_collision |= (sphere_sphere_sql2(env->spheres[i], sx_, sy_, sz_, sr_) < 0);
         }
 
-        // check for collision with all capsules in environment
-        for (unsigned int i = 0; i < env->num_capsules; i++)
+        for (unsigned int i = 0; i < env->num_capsules && !in_collision; i++)
         {
-            if (
-                sphere_capsule(env->capsules[i], sx_, sy_, sz_, sr_) < 0
-            )
-            {
-                return true;
-            }
+            in_collision |= (sphere_capsule(env->capsules[i], sx_, sy_, sz_, sr_) < 0);
         }
 
-        for (unsigned int i = 0; i < env->num_z_aligned_capsules; i++)
+        for (unsigned int i = 0; i < env->num_z_aligned_capsules && !in_collision; i++)
         {
-            if (
-                sphere_z_aligned_capsule(env->z_aligned_capsules[i], sx_, sy_, sz_, sr_) < 0
-            )
-            {
-                return true;
-            }
+            in_collision |= (sphere_z_aligned_capsule(env->z_aligned_capsules[i], sx_, sy_, sz_, sr_) < 0);
         }
 
-        // check for collision with all cuboids in environment
-        const auto rsq = sr_ * sr_;
-        for (unsigned int i = 0; i < env->num_cuboids; i++)
+        for (unsigned int i = 0; i < env->num_cuboids && !in_collision; i++)
         {
-            if (
-                sphere_cuboid(env->cuboids[i], sx_, sy_, sz_, rsq) < 0
-            )
-            {
-                return true;
-            }
+            in_collision |= (sphere_cuboid(env->cuboids[i], sx_, sy_, sz_, rsq) < 0);
         }
 
-        for (unsigned int i = 0; i < env->num_z_aligned_cuboids; i++)
+        for (unsigned int i = 0; i < env->num_z_aligned_cuboids && !in_collision; i++)
         {
-            if (
-                sphere_z_aligned_cuboid(env->z_aligned_cuboids[i], sx_, sy_, sz_, rsq) < 0
-            )
-            {
-                return true;
-            }
+            in_collision |= (sphere_z_aligned_cuboid(env->z_aligned_cuboids[i], sx_, sy_, sz_, rsq) < 0);
         }
 
-        return false;
+        return in_collision;
     }
 
     __global__ void init_rng(curandState* states, unsigned long seed);
@@ -5339,9 +5311,4 @@ namespace ppln::collision {
 
         return true;
     }
-
-    // template __device__ bool fkcc<ppln::robots::Sphere>(float *config, ppln::collision::Environment<float> *env);
-
-    // template __device__ inline bool fkcc<ppln::robots::Panda>(float *config, ppln::collision::Environment<float> *env);
-
 }

@@ -91,9 +91,9 @@ namespace RRT_new {
 
     constexpr int MAX_SAMPLES = 1000000;
     constexpr int MAX_ITERS = 1000000;
-    constexpr int NUM_NEW_CONFIGS = 256;
+    constexpr int NUM_NEW_CONFIGS = 1;
     constexpr int GRANULARITY = 256;
-    constexpr float RRT_RADIUS = 2.0;
+    constexpr float RRT_RADIUS = 1.0;
 
     // threads per block for sample_edges and grow_tree
     constexpr int BLOCK_SIZE = 256;
@@ -109,12 +109,13 @@ namespace RRT_new {
 
     inline void reset_device_variables() {
         int zero = 0;
+        int neg1 = -1;
         bool false_val = false;
         
         cudaMemcpyToSymbol(atomic_free_index, &zero, sizeof(int));
         cudaMemcpyToSymbol(reached_goal, &zero, sizeof(int));
-        cudaMemcpyToSymbol(reached_goal_idx, &zero, sizeof(int));
-        cudaMemcpyToSymbol(goal_parent_idx, &zero, sizeof(int));
+        cudaMemcpyToSymbol(reached_goal_idx, &neg1, sizeof(int));
+        cudaMemcpyToSymbol(goal_parent_idx, &neg1, sizeof(int));
     }
 
     inline void setup_environment_on_device(ppln::collision::Environment<float> *&d_env, 
@@ -258,7 +259,7 @@ namespace RRT_new {
     // total number of threads we need is edges * granularity
     // Each block is of size granularity and it checks one edge. Each thread in the block checks a consecutive interpolated point along the edge.
     template <typename Robot>
-    __global__ void validate_edges(float *new_configs, int *new_config_parents, unsigned int *cc_result, int *num_colliding_edges, ppln::collision::Environment<float> *env, float *nodes) {
+    __global__ void validate_edges(float *new_configs, int *new_config_parents, unsigned int *cc_result, ppln::collision::Environment<float> *env, float *nodes) {
         static constexpr auto dim = Robot::dimension;
         int tid_in_block = threadIdx.x;
         int bid = blockIdx.x;
@@ -270,6 +271,7 @@ namespace RRT_new {
         // }
         __shared__ float delta[dim];
         __shared__ float shared_edge_start[dim];
+
         if (tid_in_block == 0) {
             float *edge_start = &nodes[new_config_parents[bid] * dim];
             float *edge_end = &new_configs[bid * dim];
@@ -294,6 +296,7 @@ namespace RRT_new {
         // }
         // calculate the configuration this thread will be checking
         float config[dim];
+
         for (int i = 0; i < dim; i++) {
             config[i] = shared_edge_start[i] + ((tid_in_block + 1) * delta[i]);
         }
@@ -344,10 +347,10 @@ namespace RRT_new {
         float *new_config = &new_configs[tid * dim];
         float config[dim];
         
-        for (int i = 0; i < dim; i++) {
-            config[i] = curand_uniform(&local_rng_state);
-        }
-        // halton_next(halton_states[tid], config);
+        // for (int i = 0; i < dim; i++) {
+        //     config[i] = curand_uniform(&local_rng_state);
+        // }
+        halton_next(halton_states[tid], config);
         // for (int i = 0; i < dim; i++) {
         //     config[i] = set_configs[set_cfg_idx * dim + i];
         // }
@@ -411,7 +414,7 @@ namespace RRT_new {
     // grow the RRT tree after we figure out what edges have no collisions
     // each thread is responsible for adding one edge to the tree
     template <typename Robot>
-    __global__ void grow_tree(float *new_configs, int *new_config_parents, unsigned int *cc_result, float *nodes, int *parents, int *num_colliding_edges, float *goal_configs, int num_goals, int *new_config_idxs) {
+    __global__ void grow_tree(float *new_configs, int *new_config_parents, unsigned int *cc_result, float *nodes, int *parents, float *goal_configs, int num_goals, int *new_config_idxs) {
         static constexpr auto dim = Robot::dimension;
         int tid = blockIdx.x * blockDim.x + threadIdx.x;
         if (tid >= NUM_NEW_CONFIGS) return;
@@ -468,7 +471,7 @@ namespace RRT_new {
         
         // Use shared memory to track validity within the block
         __shared__ bool edge_valid;
-        if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
+        if (threadIdx.x == 0) {
             edge_valid = true;
         }
         __syncthreads();
@@ -478,7 +481,7 @@ namespace RRT_new {
         __syncthreads();
 
         // Only one thread per edge updates the global state
-        if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 && edge_valid) {
+        if (threadIdx.x == 0 && edge_valid) {
             atomicCAS(&reached_goal, 0, 1);
             atomicCAS(&reached_goal_idx, -1, goal_idx);
             atomicCAS(&goal_parent_idx, -1, new_config_idxs[config_idx]);
@@ -559,8 +562,6 @@ namespace RRT_new {
         unsigned int *cc_result;
         cudaMalloc(&cc_result, NUM_NEW_CONFIGS * sizeof(unsigned int));
         cudaMemset(cc_result, 0, NUM_NEW_CONFIGS * sizeof(unsigned int));
-        int *num_colliding_edges;
-        cudaMalloc(&num_colliding_edges, sizeof(int));
         cudaCheckError(cudaGetLastError());
 
         // free index for next available position in the nodes array
@@ -596,14 +597,14 @@ namespace RRT_new {
             // collision check all the edges
             // kernel_start_time = std::chrono::steady_clock::now();
             cudaMemset(cc_result, 0, NUM_NEW_CONFIGS * sizeof(unsigned int));
-            validate_edges<Robot><<<NUM_NEW_CONFIGS, GRANULARITY>>>(new_configs, new_config_parents, cc_result, num_colliding_edges, env, nodes);
+            validate_edges<Robot><<<NUM_NEW_CONFIGS, GRANULARITY>>>(new_configs, new_config_parents, cc_result, env, nodes);
             cudaCheckError(cudaGetLastError());
             cudaDeviceSynchronize();
             // std::cout << "validate edges (ns): " << get_elapsed_nanoseconds(kernel_start_time) << "\n";
             
             // add all the new edges to the tree
             // kernel_start_time = std::chrono::steady_clock::now();
-            grow_tree<Robot><<<numBlocks, BLOCK_SIZE>>>(new_configs, new_config_parents, cc_result, nodes, parents, num_colliding_edges, goal_configs, num_goals, new_config_idxs);
+            grow_tree<Robot><<<numBlocks, BLOCK_SIZE>>>(new_configs, new_config_parents, cc_result, nodes, parents, goal_configs, num_goals, new_config_idxs);
             cudaCheckError(cudaGetLastError());
             cudaDeviceSynchronize();
             // std::cout << "grow tree (ns): " << get_elapsed_nanoseconds(kernel_start_time) << "\n";
@@ -659,6 +660,7 @@ namespace RRT_new {
             res.path.emplace_back(parent_idx);
             std::reverse(res.path.begin(), res.path.end());
         }
+        std::cout << "cost from cu: " << res.cost << "\n";
         res.nanoseconds = get_elapsed_nanoseconds(start_time);
         // printf("almost done\n");
         reset_device_variables();
@@ -673,8 +675,7 @@ namespace RRT_new {
         cudaFree(new_configs);
         cudaFree(new_config_parents);
         cudaFree(cc_result);
-        cudaFree(num_colliding_edges);
-        // cudaFree(env);
+        cudaFree(new_config_idxs);
         cudaCheckError(cudaGetLastError());
         return res;
     }

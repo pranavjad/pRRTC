@@ -140,6 +140,6 @@ int main() {
     // std::cout << "path length: " << result.path.size() << "\n";
     // std::cout << "tree size: " << result.tree_size << "\n";
     // std::cout << "iters: " << result.iters << "\n";
-    // std::cout << "cost: " << result.cost << "\n";
+    std::cout << "cost: " << result.cost << "\n";
     results[name].emplace_back(result);
 }

@@ -6,6 +6,7 @@
 #include "collision/factory.hh"
 #include "RRT_interleaved.hh"
 
+
 using json = nlohmann::json;
 
 using namespace ppln::collision;
@@ -31,10 +32,10 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
             const json& position = obj["position"];
             const json& orientation = obj["orientation_euler_xyz"];
             const float radius = obj["radius"];
-            auto cuboid = factory::cuboid::flat(
-                position[0], position[1], position[2],
-                orientation[0], orientation[1], orientation[2],
-                radius, radius, radius/2.0
+            const std::array<float, 3> dims = {radius, radius, radius/2.0f};
+            auto cuboid = factory::cuboid::array(
+                position, orientation,
+                dims
             );
             cuboid.name = obj["name"];
             cuboids.push_back(cuboid);
@@ -42,12 +43,11 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
     } else {
         for (const auto& obj : problem["cylinder"]) {
             const json& position = obj["position"];
-            const json& euler = obj["orientation_euler_xyz"];
+            const json& orientation = obj["orientation_euler_xyz"];
             const float radius = obj["radius"];
             const float length = obj["length"];
-            auto cylinder = factory::cylinder::center::flat(
-                position[0], position[1], position[2],
-                euler[0], euler[1], euler[2],
+            auto cylinder = factory::cylinder::center::array(
+                position, orientation,
                 radius, length
             );
             cylinder.name = obj["name"];
@@ -59,10 +59,8 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
         const json& position = obj["position"];
         const json& orientation = obj["orientation_euler_xyz"];
         const json& half_extents = obj["half_extents"];
-        auto cuboid = factory::cuboid::flat(
-            position[0], position[1], position[2],
-            orientation[0], orientation[1], orientation[2],
-            half_extents[0], half_extents[1], half_extents[2]
+        auto cuboid = factory::cuboid::array(
+            position, orientation, half_extents
         );
         cuboid.name = obj["name"];
         cuboids.push_back(cuboid);
@@ -121,14 +119,14 @@ int main() {
     int failed = 0;
     std::map<std::string, std::vector<PlannerResult<robots::Panda>>> results;
     std::vector<std::string> prob_names = {
-        "bookshelf_small",
-        "bookshelf_tall",
-        "bookshelf_thin",
-        "box",
-        "cage",
+        // "bookshelf_small",
+        // "bookshelf_tall",
+        // "bookshelf_thin",
+        // "box",
+        // "cage",
         "table_pick",
-        "table_under_pick",
-        "bookshelf_small"
+        // "table_under_pick",
+        // "bookshelf_small"
     };
     for (auto& name : prob_names) {
         std::cout << name << "\n";
@@ -154,7 +152,7 @@ int main() {
             // std::cout << "path length: " << result.path.size() << "\n";
             // std::cout << "tree size: " << result.tree_size << "\n";
             // std::cout << "iters: " << result.iters << "\n";
-            // std::cout << "cost: " << result.cost << "\n";
+            std::cout << "cost: " << result.cost << "\n";
             results[name].emplace_back(result);
         }
     }
