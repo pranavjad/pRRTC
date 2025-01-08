@@ -117,9 +117,10 @@ int main() {
     using Configuration = robots::Panda::Configuration;
     int failed = 0;
     std::map<std::string, std::vector<PlannerResult<robots::Panda>>> results;
-    // cage 13, 
-    std::string name = "table_pick";
-    int problem_idx = 100;
+    // cage 13 - 14842 iterations for RRT w Halton on CPU
+    // cage 100 - 200,000 iterations for RRT w Halton on CPU
+    std::string name = "cage";
+    int problem_idx = 13;
     auto pset = problems[name];
     json data = pset[problem_idx - 1];
     if (not data["valid"]) {

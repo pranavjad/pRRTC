@@ -26,35 +26,38 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas -v")
+
+
 # add_library(template_lib
 #     collision_backends.cu
 # )
 # target_include_directories(template_lib PUBLIC include)
 
-# rrt test script
-add_executable(test_rrt
-    test_rrt.cpp
-    RRT_interleaved.cu
-    RRT_new.cu
-)
+### rrt test script
+# add_executable(test_rrt
+#     test_rrt.cpp
+#     RRT_interleaved.cu
+#     RRT_new.cu
+# )
 
-target_include_directories(test_rrt
-    PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
+# target_include_directories(test_rrt
+#     PRIVATE
+#     ${CMAKE_CURRENT_SOURCE_DIR}
+# )
 
-target_link_libraries(test_rrt
-    PRIVATE
-    # template_lib
-    nlohmann_json::nlohmann_json
-    Eigen3::Eigen
-)
+# target_link_libraries(test_rrt
+#     PRIVATE
+#     # template_lib
+#     nlohmann_json::nlohmann_json
+#     Eigen3::Eigen
+# )
 
-# motion benchmark script
+### motion benchmark script
 add_executable(evaluate_mbm
     evaluate_mbm.cpp
-    RRT_interleaved.cu
-    RRTC_basic.cu
+    # RRT_interleaved.cu
+    # RRTC_basic.cu
     RRT_new.cu
 )
 
@@ -70,10 +73,10 @@ target_link_libraries(evaluate_mbm
     Eigen3::Eigen
 )
 
-# table pick 0
+### table pick 0
 add_executable(test_tablepick
     test_tablepick.cpp
-    RRT_interleaved.cu
+    # RRT_interleaved.cu
     RRT_new.cu
 )
 

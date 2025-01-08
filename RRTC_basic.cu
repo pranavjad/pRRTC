@@ -21,7 +21,8 @@ namespace RRTC {
 
     __global__ void init_rng(curandState* states, unsigned long seed) {
         int idx = blockIdx.x * blockDim.x + threadIdx.x;
-        curand_init(seed, idx, 0, &states[idx]);
+        if (idx >= NUM_NEW_CONFIGS) return;
+        curand_init(seed + idx, idx, 0, &states[idx]);
     }
 
     __device__ int atomic_free_index;
@@ -30,7 +31,6 @@ namespace RRTC {
 
     constexpr int MAX_SAMPLES = 1000000;
     constexpr int MAX_ITERS = 1000000;
-    constexpr int COORD_BOUND = 3.0;
     constexpr int NUM_NEW_CONFIGS = 8;
     constexpr int GRANULARITY = 8;
     constexpr float RRT_RADIUS = 2.0;
