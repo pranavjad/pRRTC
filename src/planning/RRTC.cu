@@ -1,4 +1,4 @@
-#include "RRT_interleaved.hh"
+#include "Planners.hh"
 #include "Robots.hh"
 #include "collision_backends.cuh"
 #include "collision/environment.hh"

@@ -5,7 +5,7 @@
 #include <chrono>
 
 #include "Robots.hh"
-#include "collision/environment.hh"
+#include "src/collision/environment.hh"
 
 template <typename Robot>
 struct PlannerResult {
@@ -36,21 +36,24 @@ inline std::size_t get_elapsed_nanoseconds(const std::chrono::time_point<std::ch
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
 }
 
+/* This file handles the declarations of each solve function so that they may be called from .cpp files. Implementation is in .cu files.*/
 namespace RRT {
     template <typename Robot>
     PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goal, ppln::collision::Environment<float> &environment);
-    // template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float> &environment);
-    // template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float> &environment);
 }
 
 namespace RRTC {
     template <typename Robot>
     PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goal, ppln::collision::Environment<float> &environment);
-    // template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float> &environment);
-    // template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float> &environment);
 }
 
-namespace RRT_new {
+namespace pRRT {
+    template <typename Robot>
+    PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goal, ppln::collision::Environment<float> &environment);
+}
+
+
+namespace nRRT {
     template <typename Robot>
     PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goal, ppln::collision::Environment<float> &environment);
 }

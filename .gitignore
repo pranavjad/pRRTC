@@ -6,3 +6,5 @@ problems.pkl
 *.nsys-rep
 Pipfile
 Pipfile.lock
+test_output
+plots

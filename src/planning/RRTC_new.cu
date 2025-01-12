@@ -1,4 +1,4 @@
-#include "RRT_interleaved.hh"
+#include "Planners.hh"
 #include "Robots.hh"
 #include "utils.cuh"
 #include "collision/environment.hh"
@@ -12,12 +12,19 @@
 #include <algorithm>
 
 /*
-Parallelized RRT with parallelized collision checking.
-Interleaved strategy: sample states in parallel, then check edges in parallel, then repeat.
-sample states in parallel, check edges in parallel, grow tree in parallel, check if the new configs can reach the goal in parallel
+Parallelized RRTC
+Add start to tree_a, and all goals to tree_b
+use an array to keep track of the tree_id of each node
+1. sample_edges: Sample new configs for tree_a and tree_b. For each new config find the NN in it's corresponding tree.
+2. validate_edges: For each edge from a new config to it's tree, validate the edge.
+3. grow_tree: Add all the valid points to their respective trees
+4. connect_1: For each new config added to tree_a or tree_b find it's NN in the opposite tree
+5. connect_2: For each edge from new_cfg-->NN_opposite_tree validate the edge
+6. Extend as far as we can along this edge. and add it to new_cfg's tree
+If we were able to go all the way, we reached goal.
 */
 
-namespace RRT_new {
+namespace RRTC_new {
     __device__ int atomic_free_index;
     __device__ int reached_goal = 0;
     __device__ int reached_goal_idx = -1;
@@ -695,6 +702,3 @@ namespace RRT_new {
     template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&);
     template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&);
 }
-
-
-

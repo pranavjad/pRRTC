@@ -26,19 +26,14 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas -v")
-
-
-# add_library(template_lib
-#     collision_backends.cu
-# )
-# target_include_directories(template_lib PUBLIC include)
+### Uncomment this line to see ptx compiler info, number of registers used, etc.
+# set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas -v")
 
 ### rrt test script
 # add_executable(test_rrt
 #     test_rrt.cpp
 #     RRT_interleaved.cu
-#     RRT_new.cu
+#     pRRT.cu
 # )
 
 # target_include_directories(test_rrt
@@ -55,10 +50,9 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas -v")
 
 ### motion benchmark script
 add_executable(evaluate_mbm
-    evaluate_mbm.cpp
-    # RRT_interleaved.cu
-    # RRTC_basic.cu
-    RRT_new.cu
+    scripts/evaluate_mbm.cpp
+    src/planning/pRRT.cu
+    src/planning/nRRT.cu
 )
 
 target_include_directories(evaluate_mbm
@@ -68,16 +62,15 @@ target_include_directories(evaluate_mbm
 
 target_link_libraries(evaluate_mbm
     PRIVATE
-    # template_lib
     nlohmann_json::nlohmann_json
     Eigen3::Eigen
 )
 
 ### table pick 0
 add_executable(test_tablepick
-    test_tablepick.cpp
-    # RRT_interleaved.cu
-    RRT_new.cu
+    scripts/test_tablepick.cpp
+    src/planning/pRRT.cu
+    src/planning/nRRT.cu
 )
 
 target_include_directories(test_tablepick

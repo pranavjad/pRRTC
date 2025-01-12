@@ -2,15 +2,15 @@
 #include <fstream>
 #include <iostream>
 
-#include "collision/environment.hh"
-#include "collision/factory.hh"
-#include "RRT_interleaved.hh"
+#include "src/collision/environment.hh"
+#include "src/collision/factory.hh"
+#include "src/planning/Planners.hh"
 
 using json = nlohmann::json;
 
 using namespace ppln::collision;
 
-std::ifstream f("panda_problems.json");
+std::ifstream f("scripts/panda_problems.json");
 
 Environment<float> problem_dict_to_env(const json& problem, const std::string& name) {
     Environment<float> env{};
@@ -53,6 +53,7 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
             capsules.push_back(cylinder);
         }
     }
+
     // Fill boxes
     for (const auto& obj : problem["box"]) {
         const json& position = obj["position"];
@@ -64,44 +65,25 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
         cuboid.name = obj["name"];
         cuboids.push_back(cuboid);
     }
+
     // Allocate memory on the heap for the arrays
     if (!spheres.empty()) {
         env.spheres = new Sphere<float>[spheres.size()];
         std::copy(spheres.begin(), spheres.end(), env.spheres);
         env.num_spheres = spheres.size();
     }
-    // else {
-    //     env.spheres = nullptr;
-    //     env.num_spheres = 0;
-    // }
 
     if (!capsules.empty()) {
         env.capsules = new Capsule<float>[capsules.size()];
         std::copy(capsules.begin(), capsules.end(), env.capsules);
         env.num_capsules = capsules.size();
     }
-    // else {
-    //     env.capsules = nullptr;
-    //     env.num_capsules = 0;
-    // }
 
     if (!cuboids.empty()) {
         env.cuboids = new Cuboid<float>[cuboids.size()];
         std::copy(cuboids.begin(), cuboids.end(), env.cuboids);
         env.num_cuboids = cuboids.size();
     }
-    // else {
-    //     env.cuboids = nullptr;
-    //     env.num_cuboids = 0;
-    // }
-
-    // Initialize other pointers to nullptr
-    // env.z_aligned_capsules = nullptr;
-    // env.num_z_aligned_capsules = 0;
-    // env.cylinders = nullptr;
-    // env.num_cylinders = 0;
-    // env.z_aligned_cuboids = nullptr;
-    // env.num_z_aligned_cuboids = 0;
 
     return env;
 }
@@ -118,7 +100,8 @@ int main() {
     int failed = 0;
     std::map<std::string, std::vector<PlannerResult<robots::Panda>>> results;
     // cage 13 - 14842 iterations for RRT w Halton on CPU
-    // cage 100 - 200,000 iterations for RRT w Halton on CPU
+    // cage 100 - ~200,000 iterations for RRT w Halton on CPU
+    // cage 70 - 342,092 iters on CPU
     std::string name = "cage";
     int problem_idx = 13;
     auto pset = problems[name];
@@ -130,17 +113,11 @@ int main() {
     printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
     Configuration start = data["start"];
     std::vector<Configuration> goals = data["goals"];
-    auto result = RRT_new::solve<robots::Panda>(start, goals, env);
+    auto result = pRRT::solve<robots::Panda>(start, goals, env);
     if (not result.solved) {
         failed ++;
         std::cout << "failed " << name << std::endl;
     }
-    // else {
-    //     std::cout << "Solved: " << name << std::endl;
-    // }
-    // std::cout << "path length: " << result.path.size() << "\n";
-    // std::cout << "tree size: " << result.tree_size << "\n";
-    // std::cout << "iters: " << result.iters << "\n";
     std::cout << "cost: " << result.cost << "\n";
     results[name].emplace_back(result);
 }

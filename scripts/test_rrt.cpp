@@ -29,7 +29,7 @@ void sphere_test() {
     robots::Sphere::Configuration start = {-4.0, -4.0, -4.0};
     std::vector<robots::Sphere::Configuration> goals = {{4.0, 4.0, 4.0}};
 
-    auto res = RRT_new::solve<robots::Sphere>(start, goals, env);
+    auto res = pRRT::solve<robots::Sphere>(start, goals, env);
 }
 
 void panda_test() {

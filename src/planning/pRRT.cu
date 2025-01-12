@@ -1,7 +1,7 @@
-#include "RRT_interleaved.hh"
+#include "Planners.hh"
 #include "Robots.hh"
 #include "utils.cuh"
-#include "collision/environment.hh"
+#include "src/collision/environment.hh"
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -17,7 +17,7 @@ Interleaved strategy: sample states in parallel, then check edges in parallel, t
 sample states in parallel, check edges in parallel, grow tree in parallel, check if the new configs can reach the goal in parallel
 */
 
-namespace RRT_new {
+namespace pRRT {
     __device__ int atomic_free_index;
     __device__ int reached_goal = 0;
     __device__ int reached_goal_idx = -1;
@@ -25,7 +25,7 @@ namespace RRT_new {
 
     constexpr int MAX_SAMPLES = 1000000;
     constexpr int MAX_ITERS = 1000000;
-    constexpr int NUM_NEW_CONFIGS = 2;
+    constexpr int NUM_NEW_CONFIGS = 64;
     constexpr int GRANULARITY = 256;
     constexpr float RRT_RADIUS = 1.0;
 
@@ -116,7 +116,6 @@ namespace RRT_new {
     inline void reset_device_variables() {
         int zero = 0;
         int neg1 = -1;
-        bool false_val = false;
         
         cudaMemcpyToSymbol(atomic_free_index, &zero, sizeof(int));
         cudaMemcpyToSymbol(reached_goal, &zero, sizeof(int));
@@ -265,7 +264,7 @@ namespace RRT_new {
     // total number of threads we need is edges * granularity
     // Each block is of size granularity and it checks one edge. Each thread in the block checks a consecutive interpolated point along the edge.
     template <typename Robot>
-    __launch_bounds__(256, 8)
+    // __launch_bounds__(256, 8)
     __global__ void validate_edges(float *new_configs, int *new_config_parents, unsigned int *cc_result, ppln::collision::Environment<float> *env, float *nodes) {
         static constexpr auto dim = Robot::dimension;
         int tid = threadIdx.x;
@@ -356,16 +355,8 @@ namespace RRT_new {
         //     config[i] = curand_uniform(&rng_states[tid]);
         // }
         halton_next(halton_states[tid], config);
-        // for (int i = 0; i < dim; i++) {
-        //     config[i] = set_configs[set_cfg_idx * dim + i];
-        // }
-        // set_cfg_idx++;
-    
-        // if (tid == 0) {printf("config before scaling: "); print_config(config, dim);}
-        
-        ppln::device_utils::scale_configuration<Robot>(config);
-        // if (tid == 0) {printf("config after scaling: "); print_config(config, dim);}
-        // __syncthreads();
+            
+        Robot::scale_cfg(config);
         
         // Track both nearest and second nearest
         float min_dist = 1000000000.0;
@@ -466,7 +457,7 @@ namespace RRT_new {
         }
         __syncthreads();
 
-        if (point_idx == 0) printf("dist to goal for config %d: %f\n", config_idx, device_utils::l2_dist(&goal_configs[goal_idx * dim], shared_start, dim));
+        // if (point_idx == 0) printf("dist to goal for config %d: %f\n", config_idx, device_utils::l2_dist(&goal_configs[goal_idx * dim], shared_start, dim));
 
         // Calculate and check this thread's point
         float config[dim];
@@ -659,7 +650,7 @@ namespace RRT_new {
             typename Robot::Configuration cfg_parent;
             std::copy_n(h_nodes.begin() + (parent_idx * dim), dim, cfg.begin());
             res.cost += l2dist<Robot>(goals[h_goal_idx], cfg);
-            Robot::print_robot_config(cfg);
+            Robot::print_robot_config(goals[h_goal_idx]);
             while (parent_idx != h_parents[parent_idx]) {
                 // std::cout << parent_idx << std::endl;
                 std::copy_n(h_nodes.begin() + parent_idx * dim, dim, cfg.begin());
@@ -669,6 +660,7 @@ namespace RRT_new {
                 res.path.emplace_back(parent_idx);
                 parent_idx = h_parents[parent_idx];
             }
+            Robot::print_robot_config(start);
             res.path.emplace_back(parent_idx);
             std::reverse(res.path.begin(), res.path.end());
         }
@@ -695,3 +687,6 @@ namespace RRT_new {
     template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&);
     template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&);
 }
+
+
+
