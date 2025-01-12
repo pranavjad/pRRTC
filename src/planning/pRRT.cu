@@ -102,7 +102,7 @@ namespace pRRT {
         int skip = (curand_uniform(&cr_states[idx]) * 500000.0f);
         printf("idx, skip: %d, %d\n", idx, skip);
         if (idx == 0) skip = 0;
-        if (idx == 1) skip = 14000;
+        // if (idx == 1) skip = 14000;
         halton_initialize(states[idx], skip);
     }
 
@@ -686,6 +686,7 @@ namespace pRRT {
 
     template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&);
     template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&);
+    template PlannerResult<typename ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&);
 }
 
 

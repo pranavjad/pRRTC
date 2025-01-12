@@ -10,7 +10,7 @@ using json = nlohmann::json;
 
 using namespace ppln::collision;
 
-std::ifstream f("scripts/panda_problems.json");
+std::ifstream f("scripts/fetch_problems.json");
 
 Environment<float> problem_dict_to_env(const json& problem, const std::string& name) {
     Environment<float> env{};
@@ -88,22 +88,18 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
     return env;
 }
 
-
-inline void describe(std::vector<PlannerResult<robots::Panda>> &results) {
-
-}
-
 int main() {
     json all_data = json::parse(f);
     json problems = all_data["problems"];
-    using Configuration = robots::Panda::Configuration;
+    using Robot = robots::Fetch;
+    using Configuration = Robot::Configuration;
     int failed = 0;
-    std::map<std::string, std::vector<PlannerResult<robots::Panda>>> results;
+    std::map<std::string, std::vector<PlannerResult<Robot>>> results;
     // cage 13 - 14842 iterations for RRT w Halton on CPU
     // cage 100 - ~200,000 iterations for RRT w Halton on CPU
     // cage 70 - 342,092 iters on CPU
-    std::string name = "cage";
-    int problem_idx = 13;
+    std::string name = "table_pick";
+    int problem_idx = 1;
     auto pset = problems[name];
     json data = pset[problem_idx - 1];
     if (not data["valid"]) {
@@ -113,7 +109,7 @@ int main() {
     printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
     Configuration start = data["start"];
     std::vector<Configuration> goals = data["goals"];
-    auto result = pRRT::solve<robots::Panda>(start, goals, env);
+    auto result = pRRT::solve<Robot>(start, goals, env);
     if (not result.solved) {
         failed ++;
         std::cout << "failed " << name << std::endl;

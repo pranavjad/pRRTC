@@ -63,6 +63,62 @@ namespace ppln::robots {
         }
     };
 
+    struct Fetch
+    {
+        static constexpr auto name = "fetch";
+        static constexpr auto dimension = 8;
+        using Configuration = std::array<float, dimension>;
+
+        __device__ static constexpr float get_s_m(int i) {
+            constexpr float values[] = {
+                0.38615f,
+                3.2112f,
+                2.739f,
+                6.28318f,
+                4.502f,
+                6.28318f,
+                4.32f,
+                6.28318f
+            };
+            return values[i];
+        }
+        
+        __device__ static constexpr float get_s_a(int i) {
+            constexpr float values[] = {
+                0.0f,
+                -1.6056f,
+                -1.221f,
+                -3.14159f,
+                -2.251f,
+                -3.14159f,
+                -2.16f,
+                -3.14159f
+            };
+            return values[i];
+        }
+        
+        inline static void print_robot_config(Configuration &cfg) {
+            for (int i = 0; i < dimension; i++) {
+                std::cout << cfg[i] << ' ';
+            }
+            std::cout << '\n';
+        };
+        
+        template<size_t I = 0>
+        __device__ __forceinline__ static void scale_cfg_impl(float *q)
+        {
+            if constexpr (I < dimension) {
+                q[I] = q[I] * get_s_m(I) + get_s_a(I);
+                scale_cfg_impl<I + 1>(q);
+            }
+        }
+
+        __device__ __forceinline__ static void scale_cfg(float *q)
+        {
+            scale_cfg_impl(q);
+        }
+    };
+
     struct Sphere
     {
         static constexpr auto name = "sphere";
