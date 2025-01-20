@@ -10,7 +10,7 @@ using json = nlohmann::json;
 
 using namespace ppln::collision;
 
-std::ifstream f("scripts/fetch_problems.json");
+std::ifstream f("scripts/panda_problems.json");
 
 Environment<float> problem_dict_to_env(const json& problem, const std::string& name) {
     Environment<float> env{};
@@ -91,7 +91,7 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
 int main() {
     json all_data = json::parse(f);
     json problems = all_data["problems"];
-    using Robot = robots::Fetch;
+    using Robot = robots::Panda;
     using Configuration = Robot::Configuration;
     int failed = 0;
     std::map<std::string, std::vector<PlannerResult<Robot>>> results;
@@ -109,7 +109,7 @@ int main() {
     printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
     Configuration start = data["start"];
     std::vector<Configuration> goals = data["goals"];
-    auto result = pRRT::solve<Robot>(start, goals, env);
+    auto result = pRRTC::solve<Robot>(start, goals, env);
     if (not result.solved) {
         failed ++;
         std::cout << "failed " << name << std::endl;

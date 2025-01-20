@@ -31,6 +31,14 @@ inline float l2dist(typename Robot::Configuration &a, typename Robot::Configurat
     return sqrt(res);
 }
 
+template <typename Robot>
+inline void print_cfg(float *config) {
+    for (int i = 0; i < Robot::dimension; i++) {
+        std::cout << config[i] << " ";
+    }
+    std::cout << "\n";
+}
+
 inline std::size_t get_elapsed_nanoseconds(const std::chrono::time_point<std::chrono::steady_clock> &start)
 {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
@@ -54,6 +62,11 @@ namespace pRRT {
 
 
 namespace nRRT {
+    template <typename Robot>
+    PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &environment);
+}
+
+namespace pRRTC {
     template <typename Robot>
     PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &environment);
 }

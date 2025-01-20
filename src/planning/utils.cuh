@@ -85,7 +85,7 @@ namespace ppln::device_utils {
         return (sphere_sphere_sql2(ax, ay, az, ar, bx, by, bz, br) < 0);
     }
 
-    // returns squared l2 distance between two configs
+    // returns l2 distance between two configs
     __device__ __forceinline__ float l2_dist(float *config_a, float *config_b, const int dim) {
         float ans = 0;
         float diff;
@@ -94,6 +94,16 @@ namespace ppln::device_utils {
             ans += diff * diff;
         }
         return sqrt(ans);
+    }
+
+    __device__ __forceinline__ float sq_l2_dist(float *config_a, float *config_b, const int dim) {
+        float ans = 0;
+        float diff;
+        for (int i = 0; i < dim; i++) {
+            diff = config_a[i] - config_b[i];
+            ans += diff * diff;
+        }
+        return ans;
     }
     /* End Sphere collision utils*/
 
