@@ -309,7 +309,7 @@ namespace pRRTC {
         __shared__ float scale;
         __shared__ volatile float *nearest_node;
         __shared__ volatile float delta[dim];
-        __shared__ volatile volatile float var_cache[GRANULARITY][10];
+        __shared__ volatile float var_cache[GRANULARITY][10];
         __shared__ volatile int index;
         __shared__ volatile float vec[dim];
         __shared__ unsigned int n_extensions;
@@ -340,6 +340,7 @@ namespace pRRTC {
                     
                     float balance_factor = 1-ratio;
                     t_tree_id = (bid < (NUM_NEW_CONFIGS * balance_factor))? 0 : 1;
+                    o_tree_id = 1 - t_tree_id;
                     
                    /*
                     if (ratio<TREE_RATIO) t_tree_id=0;
@@ -586,7 +587,7 @@ namespace pRRTC {
                             current = parent;
                             
                         }
-                        //printf("GPU path above");
+                        printf("GPU path above");
                         if (t_tree_id == 1) reached_goal_idx = current;
                         current = sindex[0];
                         // printf("entered here2\n");
@@ -598,7 +599,7 @@ namespace pRRTC {
                             o_path_size++;
                             current = parent;
                         }
-                        //printf("GPU path above 2");
+                        printf("GPU path above 2");
                         if (t_tree_id == 0) reached_goal_idx = current;
                         path_size[t_tree_id] = t_path_size;
                         path_size[o_tree_id] = o_path_size;
@@ -766,4 +767,5 @@ namespace pRRTC {
     template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&);
     template PlannerResult<typename ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&);
 }
+
 
