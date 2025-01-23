@@ -49,37 +49,38 @@ endif()
 # )
 
 ### motion benchmark script
-# add_executable(evaluate_mbm
-#     scripts/evaluate_mbm.cpp
-#     src/planning/pRRT.cu
-#     src/planning/nRRT.cu
-# )
-
-# target_include_directories(evaluate_mbm
-#     PRIVATE
-#     ${CMAKE_CURRENT_SOURCE_DIR}
-# )
-
-# target_link_libraries(evaluate_mbm
-#     PRIVATE
-#     nlohmann_json::nlohmann_json
-#     Eigen3::Eigen
-# )
-
-### table pick 0
-add_executable(test_tablepick
-    scripts/test_tablepick.cpp
+add_executable(evaluate_mbm
+    scripts/evaluate_mbm.cpp
     # src/planning/pRRT.cu
     # src/planning/nRRT.cu
     src/planning/RRTC_1.cu
 )
 
-target_include_directories(test_tablepick
+target_include_directories(evaluate_mbm
     PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(test_tablepick
+target_link_libraries(evaluate_mbm
+    PRIVATE
+    nlohmann_json::nlohmann_json
+    Eigen3::Eigen
+)
+
+### table pick 0
+add_executable(single_mbm
+    scripts/single_mbm.cpp
+    # src/planning/pRRT.cu
+    # src/planning/nRRT.cu
+    src/planning/RRTC_1.cu
+)
+
+target_include_directories(single_mbm
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(single_mbm
     PRIVATE
     # template_lib
     nlohmann_json::nlohmann_json

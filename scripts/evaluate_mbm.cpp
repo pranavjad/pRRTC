@@ -11,7 +11,7 @@ using json = nlohmann::json;
 
 using namespace ppln::collision;
 
-std::ifstream f("panda_problems.json");
+std::ifstream f("scripts/panda_problems.json");
 
 Environment<float> problem_dict_to_env(const json& problem, const std::string& name) {
     Environment<float> env{};
@@ -116,7 +116,7 @@ int main() {
             printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
             Configuration start = data["start"];
             std::vector<Configuration> goals = data["goals"];
-            auto result = nRRT::solve<robots::Panda>(start, goals, env);
+            auto result = pRRTC::solve<robots::Panda>(start, goals, env);
             if (not result.solved) {
                 failed ++;
                 std::cout << "failed " << name << std::endl;
