@@ -1,0 +1,365 @@
+#include "Planners.hh"
+#include "Robots.hh"
+#include "collision_backends.cuh"
+#include "collision/environment.hh"
+
+#include <curand.h>
+#include <curand_kernel.h>
+
+#include <vector>
+#include <iostream>
+#include <cassert>
+#include <algorithm>
+#include <numeric>
+
+/*
+Parallelized RRT with parallelized collision checking.
+Interleaved strategy: sample states in parallel, then check edges in parallel, then repeat.
+*/
+
+__device__ int atomic_free_index_a;
+__device__ int atomic_free_index_b;
+__device__ bool reached_goal = false;
+__device__ int found_goal_idx;
+
+constexpr int MAX_SAMPLES = 1000000;
+constexpr int MAX_ITERS = 1000000;
+constexpr int COORD_BOUND = 3.0;
+constexpr int NUM_NEW_CONFIGS = 1024;
+constexpr int GRANULARITY = 4096;
+constexpr float RRT_RADIUS = 2.0;
+
+// threads per block for sample_edges and grow_tree
+constexpr int BLOCK_SIZE = 256;
+
+using namespace ppln;
+
+__device__ inline void print_config(float *config, int dim) {
+    for (int i = 0; i < dim; i++) {
+        printf("%f ", config[i]);
+    }
+    printf("\n");
+}
+
+// granularity = number of interpolated points to check along each edge
+// total number of threads we need is edges * granularity
+// Each block is of size granularity and it checks one edge. Each thread in the block checks a consecutive interpolated point along the edge.
+template <typename Robot>
+__global__ void validate_edges(float *new_configs, int *new_config_parents, float *new_config_dist, bool *cc_result, int *num_colliding_edges, ppln::collision::Environment<float> *env, float *nodes) {
+    static constexpr auto dim = Robot::dimension;
+    int tid_in_block = threadIdx.x;
+    int bid = blockIdx.x;
+    // total_threads = num_samples * granularity;
+    if (bid >= NUM_NEW_CONFIGS) return;
+    if (tid_in_block >= GRANULARITY) return;
+    
+    __shared__ float delta;
+    __shared__ float shared_edge_start[dim];
+    if (tid_in_block == 0) {
+        float *edge_start = &nodes[new_config_parents[bid] * dim];
+        delta = new_config_dist[bid] / (float) GRANULARITY;
+        for (int i = 0; i < dim; i++) {
+            shared_edge_start[i] = edge_start[i];
+        }
+    }
+    __syncthreads();
+
+    // calculate the configuration this thread will be checking
+    float config[dim];
+    for (int i = 0; i < dim; i++) {
+        config[i] = shared_edge_start[i] + (tid_in_block * delta);
+    }
+
+    // check for collision
+    bool config_in_collision = not ppln::collision::fkcc<Robot>(config, env);
+    cc_result[bid] |= config_in_collision;
+}
+
+
+// initialize cuda random
+__global__ void init_rng(curandState* states, unsigned long seed) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    curand_init(seed, idx, 0, &states[idx]);
+}
+
+// each thread is responsible for finding a new edge to check
+// sample a new state -> connect it to nearest neighbor in our tree
+template <typename Robot>
+__global__ void sample_edges(float *new_configs, int *new_config_parents, float *new_config_dist, float *nodes, float *goal_configs, int num_goals, curandState *rng_states) {
+    static constexpr auto dim = Robot::dimension;
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= NUM_NEW_CONFIGS) return;
+    curandState local_rng_state = rng_states[tid];
+
+    float *config = &new_configs[tid * dim];
+
+    // if this is the first thread always sample a random goal
+    if (tid == 0) {
+        int goal_idx = (int)(num_goals * curand_uniform(&local_rng_state));
+        float *goal_config = goal_configs + (dim * sizeof(float) * goal_idx);
+        for (int i = 0; i < dim; i++) {
+            config[i] = goal_config[i];
+        }
+    }
+    // otherwise sample a random config
+    else {
+        for (int i = 0; i < dim; i++) {
+            config[i] = (2 * COORD_BOUND * curand_uniform(&local_rng_state)) - COORD_BOUND;
+        }
+        rng_states[tid] = local_rng_state;
+    }
+
+    // find nearest neighbor using with shared memory loading
+    float min_dist = 1000000000.0;
+    int nearest_idx = -1;
+
+    __shared__ float shared_nodes[BLOCK_SIZE * dim];
+    for (int chunk_start = 0; chunk_start < atomic_free_index; chunk_start += BLOCK_SIZE) {
+        int chunk_size = min(BLOCK_SIZE, atomic_free_index - chunk_start);
+
+        // Collaboratively load a BLOCK_SIZE sized chunk of nodes into shared_nodes
+        for (int i = threadIdx.x; i < chunk_size * dim; i += BLOCK_SIZE) {
+            shared_nodes[i] = nodes[chunk_start * dim + i];
+        }
+        __syncthreads();
+
+        // Find nearest neighbor in this chunk
+        for (int i = 0; i < chunk_size; i++) {
+            float dist = device_utils::l2_dist(&shared_nodes[i * dim], config, dim);
+            if (dist < min_dist) {
+                nearest_idx = chunk_start + i;
+                min_dist = dist;
+            }
+        }
+        __syncthreads();
+    }
+
+    // for (int i = 0; i < atomic_free_index; i++) {
+    //     dist = device_utils::l2_dist(&nodes[i * dim], config, dim);
+    //     if (dist < min_dist) {
+    //         nearest_idx = i;
+    //         min_dist = dist;
+    //     }
+    // }
+
+    // if (tid == 0) {
+    //     printf("%d\n", atomic_free_index);
+    //     printf("%f\n", min_dist);
+    // }
+
+    // keep it within the rrt range
+    float scale = min(1.0f, RRT_RADIUS / min_dist);
+    for (int i = 0; i < dim; i++) {
+        config[i] *= scale;
+    }
+    min_dist *= scale;
+    
+    new_config_dist[tid] = min_dist;
+
+    // set the parent of the new config
+    new_config_parents[tid] = nearest_idx;
+}
+
+// grow the RRT tree after we figure out what edges have no collisions
+// each thread is responsible for adding one edge to the tree
+template <typename Robot>
+__global__ void grow_tree(float *new_configs, int *new_config_parents, float *new_config_dist, bool *cc_result, float *nodes, int *parents, int *num_colliding_edges, float *goal_configs, int num_goals) {
+    static constexpr auto dim = Robot::dimension;
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= NUM_NEW_CONFIGS) return;
+    if (cc_result[tid]) return;  // this edge had a collision, don't add it
+
+    // The first edge is always to the goal so if we get here, we need to check if we reached the goal.
+    if (tid == 0) {
+        int goal_size = dim * sizeof(float);
+        float dist_to_goal;
+        for (int i = 0; i < num_goals; i++) {
+            dist_to_goal = device_utils::l2_dist(new_configs, &goal_configs[i * goal_size], dim);
+            if (dist_to_goal < 0.0001) {
+                reached_goal = true;
+                found_goal_idx = i;
+                return;
+            }
+        }
+    }
+
+    // Atomically get the next free index
+    int my_index = atomicAdd(&atomic_free_index, 1);
+    
+    // Copy the configuration to the nodes array
+    for (int i = 0; i < dim; i++) {
+        nodes[my_index * dim + i] = new_configs[tid * dim + i];
+    }
+    
+    // Set the parent
+    parents[my_index] = new_config_parents[tid];
+}
+
+inline void reset_device_variables() {
+    int zero = 0;
+    bool false_val = false;
+    
+    cudaMemcpyToSymbol(atomic_free_index, &zero, sizeof(int));
+    cudaMemcpyToSymbol(reached_goal, &false_val, sizeof(bool));
+    cudaMemcpyToSymbol(found_goal_idx, &zero, sizeof(int));
+}
+
+/*
+Parallelized RRTC Algo:
+1. sample_edges (1 cfg/thread) - sample a bunch of configurations in parallel, find nearest neighbor in tree_a, and nearest_neighbor in tree_b.
+2. validate_edges (1 cfg/block) - validate all the new configs => there are two edges that need to be checked
+- the small one (limited by RRT_RADIUS) grown from tree_a in the direction of the new config
+- the entire edge from tree_b to the new config because we will grow this as long as possible
+launch the kernel with NUM_NEW_CONFIG blocks and granularity_edge_1 + granularity_edge_2 threads
+Keep one array of bools that will hold the result of the first check
+Keep another array of ints that will hold the first config along the path to tree_b that failed
+3. grow_tree (1cfg/thread) - add all the valid edges to tree_a, 
+4. connect_tree (1 cfg/block) - consider the edge from the NN in tree_b to the new config. Each block will handle one such edge, and check
+the edge in parallel with granularity number of threads. If a thread fails it will min some global variable, so at the end we have the first extension which failed.
+The last config before failure we add to tree_b. If none fails we have a connection and return the solved path.
+
+*/
+template <typename Robot>
+PlannerResult<Robot> rrtc_solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &h_environment) {
+    static constexpr auto dim = Robot::dimension;
+    std::size_t iter = 0;
+    std::size_t start_index = 0;
+    std::size_t free_index = start_index + 1;
+
+    auto start_time = std::chrono::steady_clock::now();
+    PlannerResult<Robot> res;
+
+    // copy stuff to GPU
+    // GPU needs: start, goal, tree, parents, nodes
+
+    float *start_config;
+    float *goal_configs;
+    float *nodes_a;
+    int *parents_a;
+    float *nodes_b;
+    int *parents_b;
+    const int num_goals = goals.size();
+    const std::size_t config_size = dim * sizeof(float);
+    cudaMalloc(&start_config, config_size);
+    cudaMalloc(&goal_configs, config_size * num_goals);
+    cudaMalloc(&nodes_a, MAX_SAMPLES * config_size);
+    cudaMalloc(&parents_a, MAX_SAMPLES * sizeof(int));
+    cudaMalloc(&nodes_b, MAX_SAMPLES * config_size);
+    cudaMalloc(&parents_b, MAX_SAMPLES * sizeof(int));
+
+    cudaMemcpy(start_config, start.data(), config_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(goal_configs, goals.data(), config_size, cudaMemcpyHostToDevice);
+
+    // add the start config to tree A, and set the start to be it's own parent.
+    cudaMemcpy(nodes_a, start.data(), config_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(parents_a, &start_index, sizeof(int), cudaMemcpyHostToDevice);
+    // add all goal configs to tree B, and set each to be it's own parent
+    cudaMemcpy(nodes_b, goals.data(), config_size * num_goals, cudaMemcpyHostToDevice);
+    std::vector<int> parents_b_init(num_goals);
+    iota(parents_b_init.begin(), parents_b_init.end(), 0); // consecutive integers from 0 ... num_goals - 1
+    cudaMemcpy(parents_b, parents_b_init.data(), sizeof(int) * num_goals, cudaMemcpyHostToDevice);
+
+
+    // create a curandState for each thread -> holds state of RNG for each thread seperately
+    // For growing the tree we will create NUM_NEW_CONFIGS threads
+    curandState *rng_states;
+    cudaMalloc(&rng_states, NUM_NEW_CONFIGS * sizeof(curandState));
+    int numBlocks = (NUM_NEW_CONFIGS + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    init_rng<<<numBlocks, BLOCK_SIZE>>>(rng_states, 0);
+
+    // create arrays on the gpu to hold the newly sampled configs, and their parents, and dist to parent
+    float *new_configs;
+    cudaMalloc(&new_configs, NUM_NEW_CONFIGS * config_size);
+    int *new_config_parents;
+    cudaMalloc(&new_config_parents, NUM_NEW_CONFIGS * sizeof(int));
+    float *new_config_dist;
+    cudaMalloc(&new_config_dist, NUM_NEW_CONFIGS * sizeof(float));
+    cudaMemset(new_config_dist, 0, NUM_NEW_CONFIGS * sizeof(float));
+
+    // create an array to hold the result of collision check for each new edge
+    bool *cc_result;
+    cudaMalloc(&cc_result, NUM_NEW_CONFIGS * sizeof(bool));
+    cudaMemset(cc_result, 0, NUM_NEW_CONFIGS);
+    int *num_colliding_edges;
+    cudaMalloc(&num_colliding_edges, sizeof(int));
+
+    // free index for next available position in the nodes array
+    cudaMemcpyToSymbol(atomic_free_index, &free_index, sizeof(int));
+
+    // allocate for obstacles
+    ppln::collision::Environment<float> *env;
+    cudaMalloc(&env, sizeof(env));
+    cudaMemcpy(env, &h_environment, sizeof(env), cudaMemcpyHostToDevice);
+
+
+    bool done = false;
+    // main RRT loop
+    while (iter++ < MAX_ITERS && free_index < MAX_SAMPLES) {
+        // std::cout << iter << std::endl;
+        // sample configurations and get edges to be checked
+        sample_edges<Robot><<<numBlocks, BLOCK_SIZE>>>(new_configs, new_config_parents, new_config_dist, nodes, goal_configs, num_goals, rng_states);
+        cudaDeviceSynchronize();
+        // collision check all the edges
+        cudaMemset(cc_result, 0, NUM_NEW_CONFIGS);
+        validate_edges<Robot><<<NUM_NEW_CONFIGS, GRANULARITY>>>(new_configs, new_config_parents, new_config_dist, cc_result, num_colliding_edges, env, nodes);
+        cudaDeviceSynchronize();
+        // add all the new edges to the tree
+        grow_tree<Robot><<<numBlocks, BLOCK_SIZE>>>(new_configs, new_config_parents, new_config_dist, cc_result, nodes, parents, num_colliding_edges, goal_configs, num_goals);
+        cudaDeviceSynchronize();
+        
+        // update free index
+        cudaMemcpyFromSymbol(&free_index, atomic_free_index, sizeof(int), 0, cudaMemcpyDeviceToHost);
+        cudaMemcpyFromSymbol(&done, reached_goal, sizeof(bool), 0, cudaMemcpyDeviceToHost);
+        if (done) break;
+    }
+    res.tree_size = free_index;
+    res.iters = iter;
+    res.attempted_tree_size = NUM_NEW_CONFIGS * iter;
+    // retrieve data from gpu
+    std::vector<int> h_parents(MAX_SAMPLES);
+    std::vector<float> h_nodes(MAX_SAMPLES * dim);
+    cudaMemcpy(h_parents.data(), parents, MAX_SAMPLES * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_nodes.data(), nodes, MAX_SAMPLES * config_size, cudaMemcpyDeviceToHost);
+    
+    if (done) {
+        // get the index of the goal we found in the goals array
+        int h_goal_idx;
+        cudaMemcpyFromSymbol(&h_goal_idx, found_goal_idx, sizeof(int), 0, cudaMemcpyDeviceToHost);
+        // std::cout << "Found Goal: " << h_goal_idx << std::endl;
+        res.solved = true;
+        // get parent at position 0 in new_config_parents, because that will be the parent of the goal
+        int parent_idx = -1;
+        cudaMemcpy(&parent_idx, new_config_parents, sizeof(int), cudaMemcpyDeviceToHost);
+        assert(parent_idx != -1);
+        typename Robot::Configuration cfg;
+        typename Robot::Configuration cfg_parent;
+        std::copy_n(h_nodes.begin() + parent_idx, dim, cfg.begin());
+        res.cost += l2dist<Robot>(goals[h_goal_idx], cfg);
+        while (parent_idx != h_parents[parent_idx]) {
+            // std::cout << parent_idx << std::endl;
+            std::copy_n(h_nodes.begin() + parent_idx, dim, cfg.begin());
+            std::copy_n(h_nodes.begin() + h_parents[parent_idx], dim, cfg_parent.begin());
+            res.cost += l2dist<Robot>(cfg, cfg_parent);
+            res.path.emplace_back(parent_idx);
+            parent_idx = h_parents[parent_idx];
+        }
+        res.path.emplace_back(parent_idx);
+        std::reverse(res.path.begin(), res.path.end());
+    }
+    res.nanoseconds = get_elapsed_nanoseconds(start_time);
+    reset_device_variables();
+    cudaFree(start_config);
+    cudaFree(goal_configs);
+    cudaFree(nodes);
+    cudaFree(parents);
+    cudaFree(rng_states);
+    cudaFree(new_configs);
+    cudaFree(new_config_parents);
+    cudaFree(cc_result);
+    cudaFree(num_colliding_edges);
+    cudaFree(env);
+    return res;
+}
+
+template PlannerResult<typename ppln::robots::Sphere> rrtc_solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&);
+template PlannerResult<typename ppln::robots::Panda> rrtc_solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&);
