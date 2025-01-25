@@ -30,14 +30,15 @@ namespace pRRTC {
 
     constexpr int MAX_SAMPLES = 1000000;
     constexpr int MAX_ITERS = 1000000;
-    constexpr int NUM_NEW_CONFIGS = 400;
-    constexpr int GRANULARITY = 192;
-    constexpr float RRT_RADIUS = 1.5;
+    constexpr int NUM_NEW_CONFIGS = 200;
+    constexpr int GRANULARITY = 160;
+    constexpr float RRT_RADIUS = 1;
     constexpr float TREE_RATIO = 0.5;
     constexpr bool balance = true;
+    // constexpr int NUM_SAMPLE_RETRY = 3;
 
     // threads per block for sample_edges and grow_tree
-    constexpr int BLOCK_SIZE = 192;
+    constexpr int BLOCK_SIZE = 160;
 
     // Constants
     __constant__ float primes[16] = {
@@ -104,7 +105,7 @@ namespace pRRTC {
     __global__ void init_halton(HaltonState<Robot>* states, curandState* cr_states) {
         int idx = blockIdx.x * blockDim.x + threadIdx.x;
         if (idx >= NUM_NEW_CONFIGS) return;
-        int skip = (curand_uniform(&cr_states[idx]) * 500000.0f);
+        int skip = (curand_uniform(&cr_states[idx]) * 50000.0f);
         if (idx == 0) skip = 0;
         if (idx == 1) skip = 100000;
         halton_initialize(states[idx], skip);
@@ -301,7 +302,7 @@ namespace pRRTC {
         __shared__ volatile float config[dim];
         __shared__ volatile float sdata[GRANULARITY];
         __shared__ volatile unsigned int sindex[GRANULARITY];
-        __shared__ volatile unsigned int local_cc_result;
+        __shared__ volatile unsigned int local_cc_result[1];
         __shared__ float *t_nodes;
         __shared__ float *o_nodes;
         __shared__ int *t_parents;
@@ -361,11 +362,14 @@ namespace pRRTC {
 
                 /*
                 int sampling_iter=1;
-                while (sampling_iter<=3){
+                while (sampling_iter<=NUM_SAMPLE_RETRY){
                     bool invalid_sample = not ppln::collision::fkcc<Robot>(config, env, var_cache, tid);
                     if (invalid_sample){
                         halton_next(halton_states[bid], (float *)config);
                         Robot::scale_cfg((float *)config);
+                    }
+                    else{
+                        break;
                     }
                     sampling_iter++;
                 }
@@ -373,10 +377,9 @@ namespace pRRTC {
 
                 //printf("iter %d\n", iter);
                 //printf("config x %f\n", config[0]);
-                local_cc_result = 0;
+                local_cc_result[0] = 0;
             }
             __syncthreads();
-
             
 
             // if (tid == 0 && bid == 1) {
@@ -450,7 +453,7 @@ namespace pRRTC {
             }
             
             
-            bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid);
+            bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid, local_cc_result);
             // if (tid == 200 && bid == 1) {
             //     printf("device num spheres, capsules, cuboids: %d, %d, %d\n", env->num_spheres, env->num_capsules, env->num_cuboids);
             //     printf("iterp_cfg: ");
@@ -458,10 +461,10 @@ namespace pRRTC {
             //     printf("config_in_collision: %d\n", config_in_collision);
             // }
             // __syncthreads();
-            atomicOr((unsigned int *)&local_cc_result, config_in_collision ? 1u : 0u);
+            atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
             __syncthreads();
             // printf("here3\n");
-            if (local_cc_result == 0 && sdata[0]>0) {
+            if (local_cc_result[0] == 0 && sdata[0]>0) {
                 // if (tid == 2 && bid == 0) printf("entered local_cc_result\n");
                 // printf("entered local_cc_result %d %d\n", tid, bid);
                 /* grow tree */
@@ -515,7 +518,7 @@ namespace pRRTC {
                     // scale = min(1.0f, RRT_RADIUS / sdata[0]);
                     nearest_node = &o_nodes[sindex[0] * dim];
                     n_extensions = ceil(sdata[0] / RRT_RADIUS);
-                    local_cc_result = 0;
+                    local_cc_result[0] = 0;
                 }
                 __syncthreads();
 
@@ -541,17 +544,17 @@ namespace pRRTC {
                     for (int i = 0; i < dim; i++) {
                         interp_cfg[i] = config[i] + ((tid + 1) * (vec[i] / GRANULARITY));
                     }
-                    bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid);
-                    atomicOr((unsigned int *)&local_cc_result, config_in_collision ? 1u : 0u);
+                    bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid, local_cc_result);
+                    atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
                     __syncthreads();
-                    if (local_cc_result != 0) break;
+                    if (local_cc_result[0] != 0) break;
                     /* add extension to tree */
                     if (tid == 0) {
                         index = atomicAdd((int *)&atomic_free_index[t_tree_id], 1);
                         if (index >= MAX_SAMPLES) solved=-1;
                         t_parents[index] = extension_parent_idx;
                         extension_parent_idx = index;
-                        local_cc_result = 0;
+                        local_cc_result[0] = 0;
                     }
                     __syncthreads();
                     if (tid < dim) {
@@ -770,5 +773,4 @@ namespace pRRTC {
     template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&);
     template PlannerResult<typename ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&);
 }
-
 
