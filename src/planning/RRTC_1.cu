@@ -30,7 +30,7 @@ namespace pRRTC {
 
     constexpr int MAX_SAMPLES = 1000000;
     constexpr int MAX_ITERS = 1000000;
-    constexpr int NUM_NEW_CONFIGS = 200;
+    constexpr int NUM_NEW_CONFIGS = 500;
     constexpr int GRANULARITY = 160;
     constexpr float RRT_RADIUS = 1;
     constexpr float TREE_RATIO = 0.5;
