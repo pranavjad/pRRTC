@@ -31,13 +31,13 @@ namespace pRRTC {
     constexpr int MAX_SAMPLES = 1000000;
     constexpr int MAX_ITERS = 1000000;
     constexpr int NUM_NEW_CONFIGS = 400;
-    constexpr int GRANULARITY = 256;
-    constexpr float RRT_RADIUS = 1.0;
+    constexpr int GRANULARITY = 192;
+    constexpr float RRT_RADIUS = 1.5;
     constexpr float TREE_RATIO = 0.5;
     constexpr bool balance = true;
 
     // threads per block for sample_edges and grow_tree
-    constexpr int BLOCK_SIZE = 256;
+    constexpr int BLOCK_SIZE = 192;
 
     // Constants
     __constant__ float primes[16] = {
@@ -309,7 +309,7 @@ namespace pRRTC {
         __shared__ float scale;
         __shared__ volatile float *nearest_node;
         __shared__ volatile float delta[dim];
-        __shared__ volatile float var_cache[GRANULARITY][10];
+        __shared__ float var_cache[GRANULARITY][10];
         __shared__ volatile int index;
         __shared__ volatile float vec[dim];
         __shared__ unsigned int n_extensions;
@@ -335,18 +335,17 @@ namespace pRRTC {
                     t_tree_id = (bid < (NUM_NEW_CONFIGS / 2))? 0 : 1;
                     o_tree_id = 1 - t_tree_id;
                 }
-                else if (balance){
+                else if (balance && abs(atomic_free_index[0]-atomic_free_index[1])<2 * NUM_NEW_CONFIGS){
                     float ratio = atomic_free_index[0]/(float)(atomic_free_index[0]+atomic_free_index[1]);
-                    
                     float balance_factor = 1-ratio;
                     t_tree_id = (bid < (NUM_NEW_CONFIGS * balance_factor))? 0 : 1;
                     o_tree_id = 1 - t_tree_id;
-                    
-                   /*
+                }
+                else if (balance){
+                    float ratio = atomic_free_index[0]/(float)(atomic_free_index[0]+atomic_free_index[1]);
                     if (ratio<TREE_RATIO) t_tree_id=0;
                     else t_tree_id=1;
                     o_tree_id = 1 - t_tree_id;
-                    */
                 }
 
 
@@ -359,6 +358,19 @@ namespace pRRTC {
                 
                 halton_next(halton_states[bid], (float *)config);
                 Robot::scale_cfg((float *)config);
+
+                /*
+                int sampling_iter=1;
+                while (sampling_iter<=3){
+                    bool invalid_sample = not ppln::collision::fkcc<Robot>(config, env, var_cache, tid);
+                    if (invalid_sample){
+                        halton_next(halton_states[bid], (float *)config);
+                        Robot::scale_cfg((float *)config);
+                    }
+                    sampling_iter++;
+                }
+                */
+
                 //printf("iter %d\n", iter);
                 //printf("config x %f\n", config[0]);
                 local_cc_result = 0;
@@ -428,7 +440,7 @@ namespace pRRTC {
             }
             __syncthreads();
 
-            //if (tid==0) printf("sample %f %f %f %f %f %f %f neighbor %f %f %f %f %f %f %f\n", config[0], config[1], config[2], config[3], config[4], config[5], config[6], nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6]);
+            if (solved!=0) return;
             
             /* validate_edges */
             float interp_cfg[dim];
@@ -449,7 +461,7 @@ namespace pRRTC {
             atomicOr((unsigned int *)&local_cc_result, config_in_collision ? 1u : 0u);
             __syncthreads();
             // printf("here3\n");
-            if (local_cc_result == 0) {
+            if (local_cc_result == 0 && sdata[0]>0) {
                 // if (tid == 2 && bid == 0) printf("entered local_cc_result\n");
                 // printf("entered local_cc_result %d %d\n", tid, bid);
                 /* grow tree */
@@ -486,7 +498,7 @@ namespace pRRTC {
                 sdata[tid] = local_min_dist;
                 sindex[tid] = local_near_idx;
                 __syncthreads();
-                // printf("here5\n");
+                
                 for (unsigned int s = blockDim.x/2; s > 0; s >>= 1) {
                     if (tid < s) {
                         if (sdata[tid + s] < sdata[tid]) {
@@ -496,12 +508,7 @@ namespace pRRTC {
                     }
                     __syncthreads();
                 }
-                // if (tid == 0 && bid == 1) {
-                // printf("NN in opposite tree dist, idx: %f, %d\n", sqrt(sdata[0]), sindex[0]);
-                // printf("NN o tree: ");
-                // print_config(&o_nodes[sindex[0] * dim], dim);
-                // }
-                __syncthreads();
+                
                 
                 if (tid == 0) {
                     sdata[0] = sqrt(sdata[0]);
@@ -551,11 +558,7 @@ namespace pRRTC {
                         config[tid] = config[tid] + vec[tid];
                         t_nodes[index * dim + tid] = config[tid];
                     }
-                    __syncthreads();
-                    // if (tid == 0 && bid == 1) {
-                    //     printf("added to tree: ");
-                    //     print_config(config, dim);
-                    // }
+                    
                     i_extensions++;
                     __syncthreads();
                 }
@@ -582,12 +585,12 @@ namespace pRRTC {
                             cost += device_utils::l2_dist(&t_nodes[current * dim], &t_nodes[parent * dim], dim);
                             for (int i = 0; i < dim; i++) path[t_tree_id][t_path_size * dim + i] = t_nodes[current * dim + i];
                             
-                            print_config(&t_nodes[current * dim], dim);
+                            //print_config(&t_nodes[current * dim], dim);
                             t_path_size++;
                             current = parent;
                             
                         }
-                        printf("GPU path above");
+                        //printf("GPU path above");
                         if (t_tree_id == 1) reached_goal_idx = current;
                         current = sindex[0];
                         // printf("entered here2\n");
@@ -595,11 +598,11 @@ namespace pRRTC {
                             parent = o_parents[current];
                             cost += device_utils::l2_dist(&o_nodes[current * dim], &o_nodes[parent * dim], dim);
                             for (int i = 0; i < dim; i++) path[o_tree_id][o_path_size * dim + i] = o_nodes[current * dim + i];
-                            print_config(&o_nodes[current * dim], dim);
+                            //print_config(&o_nodes[current * dim], dim);
                             o_path_size++;
                             current = parent;
                         }
-                        printf("GPU path above 2");
+                        //printf("GPU path above 2");
                         if (t_tree_id == 0) reached_goal_idx = current;
                         path_size[t_tree_id] = t_path_size;
                         path_size[o_tree_id] = o_path_size;
