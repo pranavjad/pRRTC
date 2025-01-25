@@ -322,17 +322,17 @@ namespace ppln::collision {
     // returns false if the config does collide with an obstacle, returns true if the config does not collide
 
     template <typename Robot>
-    __device__ __forceinline__ bool fkcc(volatile float *config, ppln::collision::Environment<float> *env, volatile float var_cache[256][10], int tid);
+    __device__ __forceinline__ bool fkcc(volatile float *config, ppln::collision::Environment<float> *env, float var_cache[256][10], int tid);
 
 
     template <>
-    __device__ __forceinline__ bool fkcc<ppln::robots::Sphere>(volatile float *config, ppln::collision::Environment<float> *env, volatile float var_cache[256][10], int tid)
+    __device__ __forceinline__ bool fkcc<ppln::robots::Sphere>(volatile float *config, ppln::collision::Environment<float> *env, float var_cache[256][10], int tid)
     {
         return not sphere_environment_in_collision(env, config[0], config[1], config[2], ppln::robots::Sphere::radius);
     }
 
     template <>
-    __device__  __forceinline__ bool fkcc<ppln::robots::Panda>(volatile float *q, ppln::collision::Environment<float> *environment, volatile float var_cache[256][10], int tid)
+    __device__  __forceinline__ bool fkcc<ppln::robots::Panda>(volatile float *q, ppln::collision::Environment<float> *environment, float var_cache[256][10], int tid)
     {
         // Ignore static frame collisions - needed for some evaluation problems
         // if (/*panda_link0*/ sphere_environment_in_collision(environment, 0.0, 0.0, 0.05, 0.08))
@@ -5262,7 +5262,7 @@ namespace ppln::collision {
     }
 
     template <>
-    __device__  __forceinline__ bool fkcc<ppln::robots::Fetch>(volatile float *q, ppln::collision::Environment<float> *environment, volatile float var_cache[256][10], int tid)
+    __device__  __forceinline__ bool fkcc<ppln::robots::Fetch>(volatile float *q, ppln::collision::Environment<float> *environment, float var_cache[256][10], int tid)
     {
         if (/*base_link*/ sphere_environment_in_collision(environment, -0.02, 0.0, 0.188, 0.34))
         {
