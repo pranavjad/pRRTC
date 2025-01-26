@@ -30,15 +30,15 @@ namespace pRRTC {
 
     constexpr int MAX_SAMPLES = 1000000;
     constexpr int MAX_ITERS = 1000000;
-    constexpr int NUM_NEW_CONFIGS = 500;
-    constexpr int GRANULARITY = 160;
-    constexpr float RRT_RADIUS = 1;
+    constexpr int NUM_NEW_CONFIGS = 600;
+    constexpr int GRANULARITY = 64;
+    constexpr float RRT_RADIUS = 0.5;
     constexpr float TREE_RATIO = 0.5;
     constexpr bool balance = true;
     // constexpr int NUM_SAMPLE_RETRY = 3;
 
     // threads per block for sample_edges and grow_tree
-    constexpr int BLOCK_SIZE = 160;
+    constexpr int BLOCK_SIZE = 64;
 
     // Constants
     __constant__ float primes[16] = {
@@ -336,7 +336,7 @@ namespace pRRTC {
                     t_tree_id = (bid < (NUM_NEW_CONFIGS / 2))? 0 : 1;
                     o_tree_id = 1 - t_tree_id;
                 }
-                else if (balance && abs(atomic_free_index[0]-atomic_free_index[1])<2 * NUM_NEW_CONFIGS){
+                else if (balance && abs(atomic_free_index[0]-atomic_free_index[1])<1.5 * NUM_NEW_CONFIGS){
                     float ratio = atomic_free_index[0]/(float)(atomic_free_index[0]+atomic_free_index[1]);
                     float balance_factor = 1-ratio;
                     t_tree_id = (bid < (NUM_NEW_CONFIGS * balance_factor))? 0 : 1;
@@ -773,4 +773,3 @@ namespace pRRTC {
     template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&);
     template PlannerResult<typename ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&);
 }
-
