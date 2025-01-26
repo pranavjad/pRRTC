@@ -53,7 +53,7 @@ add_executable(evaluate_mbm
     scripts/evaluate_mbm.cpp
     # src/planning/pRRT.cu
     # src/planning/nRRT.cu
-    src/planning/RRTC_1.cu
+    src/planning/pRRTC.cu
 )
 
 target_include_directories(evaluate_mbm
@@ -72,7 +72,7 @@ add_executable(single_mbm
     scripts/single_mbm.cpp
     # src/planning/pRRT.cu
     # src/planning/nRRT.cu
-    src/planning/RRTC_1.cu
+    src/planning/pRRTC.cu
 )
 
 target_include_directories(single_mbm

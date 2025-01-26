@@ -11,8 +11,6 @@ using json = nlohmann::json;
 
 using namespace ppln::collision;
 
-std::ifstream f("scripts/panda_problems.json");
-
 Environment<float> problem_dict_to_env(const json& problem, const std::string& name) {
     Environment<float> env{};
     
@@ -88,12 +86,12 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
     return env;
 }
 
-int main() {
-    json all_data = json::parse(f);
-    json problems = all_data["problems"];
-    using Configuration = robots::Panda::Configuration;
+
+template<typename Robot>
+void run_planning(const json &problems) {
+    using Configuration = typename Robot::Configuration;
     int failed = 0;
-    std::map<std::string, std::vector<PlannerResult<robots::Panda>>> results;
+    std::map<std::string, std::vector<PlannerResult<Robot>>> results;
     std::vector<std::string> prob_names = {
         "bookshelf_small",
         "bookshelf_tall",
@@ -116,7 +114,7 @@ int main() {
             printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
             Configuration start = data["start"];
             std::vector<Configuration> goals = data["goals"];
-            auto result = pRRTC::solve<robots::Panda>(start, goals, env);
+            auto result = pRRTC::solve<Robot>(start, goals, env);
             if (not result.solved) {
                 failed ++;
                 std::cout << "failed " << name << std::endl;
@@ -172,5 +170,24 @@ int main() {
         std::cout << "avg time per node added to tree (μs): " << avg_time_per_iter/1000 << std::endl;
         std::cout << "avg time per attempted addition of node (μs): " << avg_time_per_attempted_iter/1000 << std::endl;
         std::cout << "----" << std::endl;
+    }
+}
+
+int main(int argc, char* argv[]) {
+    std::string robot_name = "panda";
+    if (argc == 2) {
+        robot_name = argv[1];
+    }
+    std::string path = "scripts/" + robot_name + "_problems.json";
+    std::ifstream f(path);
+    json all_data = json::parse(f);
+    json problems = all_data["problems"];
+    if (robot_name == "fetch") {
+        run_planning<robots::Fetch>(problems);
+    } else if (robot_name == "panda") {
+        run_planning<robots::Panda>(problems);
+    } else {
+        std::cerr << "Unsupported robot type: " << robot_name << "\n";
+        return 1;
     }
 }
