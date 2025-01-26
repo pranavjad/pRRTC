@@ -5,6 +5,7 @@
 
 #include <curand.h>
 #include <curand_kernel.h>
+#include <float.h>
 
 #include <vector>
 #include <iostream>
@@ -35,6 +36,10 @@ namespace pRRTC {
     constexpr float RRT_RADIUS = 0.5;
     constexpr float TREE_RATIO = 0.5;
     constexpr bool balance = true;
+    constexpr bool dynamic_domain = true;
+    constexpr float ALPHA = 0.0001;
+    constexpr float dd_RADIUS = 4.0;
+    constexpr float dd_MIN_RADIUS = 1.0;
     // constexpr int NUM_SAMPLE_RETRY = 3;
 
     // threads per block for sample_edges and grow_tree
@@ -287,6 +292,7 @@ namespace pRRTC {
     __global__ void rrtc(
         float **nodes,
         int **parents,
+        float **radii,
         HaltonState<Robot> *halton_states,
         curandState *rng_states,
         ppln::collision::Environment<float> *env
@@ -409,14 +415,12 @@ namespace pRRTC {
                 float sdata_tid = sdata[tid];
                 
                 __syncthreads();
-                if (tid < s && (tid+s)<atomic_free_index[t_tree_id]){
+                if (tid < s && ((tid + s) < atomic_free_index[t_tree_id])){
                     if (sdata_tid_s < sdata_tid) {
                         sdata[tid] = sdata[tid + s];
                         sindex[tid] = sindex[tid + s];
                     }
                 }
-                    
-                
                 __syncthreads();
             }
 
@@ -430,12 +434,18 @@ namespace pRRTC {
             // }
             // __syncthreads();
             // now calculate the extension
-            
+
             if (tid == 0) {
-                scale = min(1.0f, RRT_RADIUS / sqrt(sdata[0]));
+                sdata[0] = sqrt(sdata[0]);
+                scale = min(1.0f, RRT_RADIUS / (sdata[0]));
                 nearest_node = &t_nodes[sindex[0] * dim];
             }
             __syncthreads();
+
+            float nearest_radius = radii[t_tree_id][sindex[0]];
+            if (dynamic_domain && nearest_radius < sdata[0]) {
+                continue;
+            }
 
             if (tid < dim) {
                 config[tid] = nearest_node[tid] + ((config[tid] - nearest_node[tid]) * scale);
@@ -464,7 +474,7 @@ namespace pRRTC {
             atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
             __syncthreads();
             // printf("here3\n");
-            if (local_cc_result[0] == 0 && sdata[0]>0) {
+            if (local_cc_result[0] == 0 && sdata[0] > 0) {
                 // if (tid == 2 && bid == 0) printf("entered local_cc_result\n");
                 // printf("entered local_cc_result %d %d\n", tid, bid);
                 /* grow tree */
@@ -473,6 +483,10 @@ namespace pRRTC {
                     index = atomicAdd((int *)&atomic_free_index[t_tree_id], 1);
                     if (index >= MAX_SAMPLES) solved=-1;
                     t_parents[index] = sindex[0];
+                    radii[t_tree_id][index] = FLT_MAX;
+                    if (dynamic_domain && nearest_radius != FLT_MAX) {
+                        radii[t_tree_id][sindex[0]] *= (1 + ALPHA);
+                    }
                 }
                 __syncthreads();
 
@@ -553,6 +567,7 @@ namespace pRRTC {
                         index = atomicAdd((int *)&atomic_free_index[t_tree_id], 1);
                         if (index >= MAX_SAMPLES) solved=-1;
                         t_parents[index] = extension_parent_idx;
+                        radii[t_tree_id][index] = FLT_MAX;
                         extension_parent_idx = index;
                         local_cc_result[0] = 0;
                     }
@@ -617,6 +632,16 @@ namespace pRRTC {
                 }
                 // printf("here8\n");
             }
+            else if (dynamic_domain) {
+                if (nearest_radius == FLT_MAX)
+                {
+                    radii[t_tree_id][sindex[0]] = dd_RADIUS;
+                }
+                else
+                {
+                    radii[t_tree_id][sindex[0]] = max(radii[t_tree_id][sindex[0]] * (1.F - ALPHA), dd_MIN_RADIUS);
+                }
+            }
             __syncthreads();
             if (solved!=0) return;
         }
@@ -642,19 +667,24 @@ namespace pRRTC {
         int num_goals = goals.size();
         float *nodes[2];
         int *parents[2];
+        float *radii[2];
         float **d_nodes;
         int **d_parents;
+        float **d_radii;
         cudaMalloc(&d_nodes, 2 * sizeof(float*));
         cudaMalloc(&d_parents, 2 * sizeof(int*));
+        cudaMalloc(&d_radii, 2 * sizeof(float*));
         const std::size_t config_size = dim * sizeof(float);
         cudaMalloc(&start_config, config_size);
         cudaMalloc(&goal_configs, config_size * num_goals);
         for (int i = 0; i < 2; i++) {
             cudaMalloc(&nodes[i], MAX_SAMPLES * config_size);
             cudaMalloc(&parents[i], MAX_SAMPLES * sizeof(int));
+            cudaMalloc(&radii[i], MAX_SAMPLES * sizeof(float));
         }
         cudaMemcpy(d_nodes, nodes, 2 * sizeof(float*), cudaMemcpyHostToDevice);
         cudaMemcpy(d_parents, parents, 2 * sizeof(int*), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_radii, radii, 2 * sizeof(float*), cudaMemcpyHostToDevice);
 
         cudaMemcpy(start_config, start.data(), config_size, cudaMemcpyHostToDevice);
         cudaMemcpy(goal_configs, goals.data(), config_size, cudaMemcpyHostToDevice);
@@ -667,6 +697,11 @@ namespace pRRTC {
         std::vector<int> parents_b_init(num_goals);
         iota(parents_b_init.begin(), parents_b_init.end(), 0); // consecutive integers from 0 ... num_goals - 1
         cudaMemcpy(parents[1], parents_b_init.data(), sizeof(int) * num_goals, cudaMemcpyHostToDevice);
+
+        // initialize radii
+        std::vector<float> radii_init(num_goals, FLT_MAX);
+        cudaMemcpy(radii[0], radii_init.data(), sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(radii[1], radii_init.data(), sizeof(float) * num_goals, cudaMemcpyHostToDevice);
 
         // create a curandState for each thread -> holds state of RNG for each thread seperately
         // For growing the tree we will create NUM_NEW_CONFIGS threads
@@ -702,6 +737,7 @@ namespace pRRTC {
         rrtc<Robot><<<NUM_NEW_CONFIGS, GRANULARITY>>> (
             d_nodes,
             d_parents,
+            d_radii,
             halton_states,
             rng_states,
             env
