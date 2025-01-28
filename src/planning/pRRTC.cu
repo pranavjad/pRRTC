@@ -1,6 +1,7 @@
 #include "Planners.hh"
 #include "Robots.hh"
 #include "utils.cuh"
+#include "pRRTC_settings.hh"
 #include "src/collision/environment.hh"
 
 #include <curand.h>
@@ -14,9 +15,7 @@
 #include <numeric>
 
 /*
-New attempt to rewrite RRTC from scratch.
-I realize now that everything can be organized into one kernel with launch parameters <<<NUM_NEW_CONFIGS, GRANULARITY>>>
-I am going to try this approach and see how it goes.
+Parallelized RRTC: Each block works to add a config to the tree (either start or goal depending on balance)
 */
 
 
@@ -28,21 +27,21 @@ namespace pRRTC {
     __device__ int path_size[2] = {0, 0};
     __device__ float cost = 0.0;
     __device__ int reached_goal_idx = 0;
+    __constant__ pRRTC_settings d_settings;
 
-    constexpr int MAX_SAMPLES = 1000000;
-    constexpr int MAX_ITERS = 1000000;
-    constexpr int NUM_NEW_CONFIGS = 600;
-    constexpr int GRANULARITY = 64;
-    constexpr float RRT_RADIUS = 0.5;
-    constexpr float TREE_RATIO = 0.5;
-    constexpr bool balance = true;
-    constexpr bool dynamic_domain = true;
-    constexpr float ALPHA = 0.0001;
-    constexpr float dd_RADIUS = 4.0;
-    constexpr float dd_MIN_RADIUS = 1.0;
+    // constexpr int MAX_SAMPLES = 1000000;
+    // constexpr int MAX_ITERS = 1000000;
+    // constexpr int NUM_NEW_CONFIGS = 600;
+    constexpr int MAX_GRANULARITY = 256;
+    // constexpr float RRT_RADIUS = 0.5;
+    // constexpr float TREE_RATIO = 0.5;
+    // constexpr bool balance = true;
+    // constexpr bool dynamic_domain = true;
+    // constexpr float ALPHA = 0.0001;
+    // constexpr float dd_RADIUS = 4.0;
+    // constexpr float dd_MIN_RADIUS = 1.0;
     // constexpr int NUM_SAMPLE_RETRY = 3;
 
-    // threads per block for sample_edges and grow_tree
     constexpr int BLOCK_SIZE = 64;
 
     // Constants
@@ -109,7 +108,7 @@ namespace pRRTC {
     template <typename Robot>
     __global__ void init_halton(HaltonState<Robot>* states, curandState* cr_states) {
         int idx = blockIdx.x * blockDim.x + threadIdx.x;
-        if (idx >= NUM_NEW_CONFIGS) return;
+        if (idx >= d_settings.num_new_configs) return;
         int skip = (curand_uniform(&cr_states[idx]) * 50000.0f);
         if (idx == 0) skip = 0;
         if (idx == 1) skip = 100000;
@@ -306,8 +305,8 @@ namespace pRRTC {
         __shared__ int t_tree_id; // this tree
         __shared__ int o_tree_id; // the other tree
         __shared__ volatile float config[dim];
-        __shared__ volatile float sdata[GRANULARITY];
-        __shared__ volatile unsigned int sindex[GRANULARITY];
+        __shared__ volatile float sdata[MAX_GRANULARITY];
+        __shared__ volatile unsigned int sindex[MAX_GRANULARITY];
         __shared__ volatile unsigned int local_cc_result[1];
         __shared__ float *t_nodes;
         __shared__ float *o_nodes;
@@ -316,7 +315,7 @@ namespace pRRTC {
         __shared__ float scale;
         __shared__ volatile float *nearest_node;
         __shared__ volatile float delta[dim];
-        __shared__ float var_cache[GRANULARITY][10];
+        __shared__ float var_cache[MAX_GRANULARITY][10];
         __shared__ volatile int index;
         __shared__ volatile float vec[dim];
         __shared__ unsigned int n_extensions;
@@ -335,54 +334,33 @@ namespace pRRTC {
             
             if (tid == 0) {
                 iter++;
-                if (iter>MAX_ITERS) atomicCAS((int *)&solved, 0, -1);
+                if (iter > d_settings.max_iters) atomicCAS((int *)&solved, 0, -1);
                 // t_tree_id = 0;
 
-                if (!balance || iter==1){
-                    t_tree_id = (bid < (NUM_NEW_CONFIGS / 2))? 0 : 1;
+                if (!d_settings.balance || iter==1){
+                    t_tree_id = (bid < (d_settings.num_new_configs / 2))? 0 : 1;
                     o_tree_id = 1 - t_tree_id;
                 }
-                else if (balance && abs(atomic_free_index[0]-atomic_free_index[1])<1.5 * NUM_NEW_CONFIGS){
-                    float ratio = atomic_free_index[0]/(float)(atomic_free_index[0]+atomic_free_index[1]);
-                    float balance_factor = 1-ratio;
-                    t_tree_id = (bid < (NUM_NEW_CONFIGS * balance_factor))? 0 : 1;
+                else if (d_settings.balance && abs(atomic_free_index[0]-atomic_free_index[1]) < 1.5 * d_settings.num_new_configs){
+                    float ratio = atomic_free_index[0] / (float)(atomic_free_index[0]+atomic_free_index[1]);
+                    float balance_factor = 1 - ratio;
+                    t_tree_id = (bid < (d_settings.num_new_configs * balance_factor))? 0 : 1;
                     o_tree_id = 1 - t_tree_id;
                 }
-                else if (balance){
-                    float ratio = atomic_free_index[0]/(float)(atomic_free_index[0]+atomic_free_index[1]);
-                    if (ratio<TREE_RATIO) t_tree_id=0;
-                    else t_tree_id=1;
+                else if (d_settings.balance) {
+                    float ratio = atomic_free_index[0] / (float)(atomic_free_index[0] + atomic_free_index[1]);
+                    if (ratio < d_settings.tree_ratio) t_tree_id = 0;
+                    else t_tree_id = 1;
                     o_tree_id = 1 - t_tree_id;
                 }
 
-
-                // if (bid == 0) printf("t_tree_id: %d\n", t_tree_id);
                 t_nodes = nodes[t_tree_id];
                 o_nodes = nodes[o_tree_id];
                 t_parents = parents[t_tree_id];
                 o_parents = parents[o_tree_id];
-                // printf("here2\n");
                 
                 halton_next(halton_states[bid], (float *)config);
                 Robot::scale_cfg((float *)config);
-
-                /*
-                int sampling_iter=1;
-                while (sampling_iter<=NUM_SAMPLE_RETRY){
-                    bool invalid_sample = not ppln::collision::fkcc<Robot>(config, env, var_cache, tid);
-                    if (invalid_sample){
-                        halton_next(halton_states[bid], (float *)config);
-                        Robot::scale_cfg((float *)config);
-                    }
-                    else{
-                        break;
-                    }
-                    sampling_iter++;
-                }
-                */
-
-                //printf("iter %d\n", iter);
-                //printf("config x %f\n", config[0]);
                 local_cc_result[0] = 0;
             }
             __syncthreads();
@@ -424,32 +402,24 @@ namespace pRRTC {
                 __syncthreads();
             }
 
-
-
             // by this point NN dist = sdata[0], NN index = sindex[0]
-            // if (tid == 0 && bid == 0) {
-            //     printf("NN dist, idx: %f, %d\n", sqrt(sdata[0]), sindex[0]);
-            //     print_config(&t_nodes[sindex[0] * dim], dim);
-            //     print_config(&nodes[1][0], dim);
-            // }
-            // __syncthreads();
             // now calculate the extension
 
             if (tid == 0) {
                 sdata[0] = sqrt(sdata[0]);
-                scale = min(1.0f, RRT_RADIUS / (sdata[0]));
+                scale = min(1.0f, d_settings.range / (sdata[0]));
                 nearest_node = &t_nodes[sindex[0] * dim];
             }
             __syncthreads();
 
             float nearest_radius = radii[t_tree_id][sindex[0]];
-            if (dynamic_domain && nearest_radius < sdata[0]) {
+            if (d_settings.dynamic_domain && nearest_radius < sdata[0]) {
                 continue;
             }
 
             if (tid < dim) {
                 config[tid] = nearest_node[tid] + ((config[tid] - nearest_node[tid]) * scale);
-                delta[tid] = (config[tid] - nearest_node[tid]) / (float) GRANULARITY;
+                delta[tid] = (config[tid] - nearest_node[tid]) / (float) d_settings.granularity;
             }
             __syncthreads();
 
@@ -462,30 +432,18 @@ namespace pRRTC {
 
             }
             
-            
             bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid, local_cc_result);
-            // if (tid == 200 && bid == 1) {
-            //     printf("device num spheres, capsules, cuboids: %d, %d, %d\n", env->num_spheres, env->num_capsules, env->num_cuboids);
-            //     printf("iterp_cfg: ");
-            //     print_config(interp_cfg, dim);
-            //     printf("config_in_collision: %d\n", config_in_collision);
-            // }
-            // __syncthreads();
             atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
             __syncthreads();
-            // printf("here3\n");
             if (local_cc_result[0] == 0 && sdata[0] > 0) {
-                // if (tid == 2 && bid == 0) printf("entered local_cc_result\n");
-                // printf("entered local_cc_result %d %d\n", tid, bid);
                 /* grow tree */
-                
                 if (tid == 0) {
                     index = atomicAdd((int *)&atomic_free_index[t_tree_id], 1);
-                    if (index >= MAX_SAMPLES) solved=-1;
+                    if (index >= d_settings.max_samples) solved=-1;
                     t_parents[index] = sindex[0];
                     radii[t_tree_id][index] = FLT_MAX;
-                    if (dynamic_domain && nearest_radius != FLT_MAX) {
-                        radii[t_tree_id][sindex[0]] *= (1 + ALPHA);
+                    if (d_settings.dynamic_domain && nearest_radius != FLT_MAX) {
+                        radii[t_tree_id][sindex[0]] *= (1 + d_settings.dd_alpha);
                     }
                 }
                 __syncthreads();
@@ -495,14 +453,7 @@ namespace pRRTC {
                 }
                 __syncthreads();
 
-                // if (tid == 0 && bid == 1) {
-                //     printf("added to tree: ");
-                //     print_config(config, dim);
-                // }
-                // __syncthreads();
-                // printf("here4\n");
                 /* connect */
-                // find nearest neighbor in opposite tree
                 local_min_dist = INFINITY;
                 local_near_idx = 0;
                 for (unsigned int i = 0; i < atomic_free_index[o_tree_id]; i += blockDim.x) {
@@ -531,23 +482,15 @@ namespace pRRTC {
                     sdata[0] = sqrt(sdata[0]);
                     // scale = min(1.0f, RRT_RADIUS / sdata[0]);
                     nearest_node = &o_nodes[sindex[0] * dim];
-                    n_extensions = ceil(sdata[0] / RRT_RADIUS);
+                    n_extensions = ceil(sdata[0] / d_settings.range);
                     local_cc_result[0] = 0;
                 }
                 __syncthreads();
 
                 if (tid < dim) {
-                    // vec[tid] = (nearest_node[tid] - config[tid]) * scale;
                     vec[tid] = (nearest_node[tid] - config[tid]) / (float) n_extensions;
                 }
                 __syncthreads();
-
-
-                // if (tid == 0 && bid == 1) {
-                //     printf("vec:");
-                //     print_config(vec, dim);
-                // }
-                // __syncthreads();
 
                 // validate the edge to the nearest neighbor in opposite tree, go as far as we can
                 int i_extensions = 0;
@@ -556,7 +499,7 @@ namespace pRRTC {
                 while (i_extensions < n_extensions) {
                     /* each thread checking an interpolated config along the extension vector*/
                     for (int i = 0; i < dim; i++) {
-                        interp_cfg[i] = config[i] + ((tid + 1) * (vec[i] / GRANULARITY));
+                        interp_cfg[i] = config[i] + ((tid + 1) * (vec[i] / d_settings.granularity));
                     }
                     bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid, local_cc_result);
                     atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
@@ -565,7 +508,7 @@ namespace pRRTC {
                     /* add extension to tree */
                     if (tid == 0) {
                         index = atomicAdd((int *)&atomic_free_index[t_tree_id], 1);
-                        if (index >= MAX_SAMPLES) solved=-1;
+                        if (index >= d_settings.max_samples) solved=-1;
                         t_parents[index] = extension_parent_idx;
                         radii[t_tree_id][index] = FLT_MAX;
                         extension_parent_idx = index;
@@ -580,17 +523,9 @@ namespace pRRTC {
                     i_extensions++;
                     __syncthreads();
                 }
-                // if (tid == 0) {
-                //     printf("n_extensions: %d\n", n_extensions);
-                //     printf("i_extensions: %d\n", i_extensions);
-                // }
-                // printf("here7\n");
                 if (i_extensions == n_extensions) { // connected
                     if (tid == 0 && atomicCAS((int *)&solved, 0, 1) == 0) {
-                        //printf("entered here %d %d\n", tid, bid);
-                        //printf("n_extensions: %d\n", n_extensions);
                         // trace back to the start and goal.
-                        // int current = atomic_free_index[t_tree_id] - 1;
                         int current = index;
                         int parent;
                         int t_path_size = 0;
@@ -632,14 +567,14 @@ namespace pRRTC {
                 }
                 // printf("here8\n");
             }
-            else if (dynamic_domain) {
+            else if (d_settings.dynamic_domain) {
                 if (nearest_radius == FLT_MAX)
                 {
-                    radii[t_tree_id][sindex[0]] = dd_RADIUS;
+                    radii[t_tree_id][sindex[0]] = d_settings.dd_radius;
                 }
                 else
                 {
-                    radii[t_tree_id][sindex[0]] = max(radii[t_tree_id][sindex[0]] * (1.F - ALPHA), dd_MIN_RADIUS);
+                    radii[t_tree_id][sindex[0]] = max(radii[t_tree_id][sindex[0]] * (1.F - d_settings.dd_alpha), d_settings.dd_min_radius);
                 }
             }
             __syncthreads();
@@ -653,15 +588,25 @@ namespace pRRTC {
 
 
     template <typename Robot>
-    PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &h_environment) {
+    PlannerResult<Robot> solve(
+        typename Robot::Configuration &start,
+        std::vector<typename Robot::Configuration> &goals,
+        ppln::collision::Environment<float> &h_environment,
+        pRRTC_settings &settings
+    ) 
+    {
         static constexpr auto dim = Robot::dimension;
         std::size_t iter = 0;
         std::size_t start_index = 0;
 
         
         PlannerResult<Robot> res;
-
         // copy data to GPU
+
+        // pRRTC_settings *d_settings;
+        // cudaMalloc(&d_settings, sizeof(pRRTC_settings));
+        cudaMemcpyToSymbol(d_settings, &settings, sizeof(settings));
+
         float *start_config;
         float *goal_configs;
         int num_goals = goals.size();
@@ -678,9 +623,9 @@ namespace pRRTC {
         cudaMalloc(&start_config, config_size);
         cudaMalloc(&goal_configs, config_size * num_goals);
         for (int i = 0; i < 2; i++) {
-            cudaMalloc(&nodes[i], MAX_SAMPLES * config_size);
-            cudaMalloc(&parents[i], MAX_SAMPLES * sizeof(int));
-            cudaMalloc(&radii[i], MAX_SAMPLES * sizeof(float));
+            cudaMalloc(&nodes[i], settings.max_samples * config_size);
+            cudaMalloc(&parents[i], settings.max_samples * sizeof(int));
+            cudaMalloc(&radii[i], settings.max_samples * sizeof(float));
         }
         cudaMemcpy(d_nodes, nodes, 2 * sizeof(float*), cudaMemcpyHostToDevice);
         cudaMemcpy(d_parents, parents, 2 * sizeof(int*), cudaMemcpyHostToDevice);
@@ -706,14 +651,14 @@ namespace pRRTC {
         // create a curandState for each thread -> holds state of RNG for each thread seperately
         // For growing the tree we will create NUM_NEW_CONFIGS threads
         curandState *rng_states;
-        int num_rng_states = NUM_NEW_CONFIGS * dim;
+        int num_rng_states = settings.num_new_configs * dim;
         cudaMalloc(&rng_states, num_rng_states * sizeof(curandState));
         int numBlocks = (num_rng_states + BLOCK_SIZE - 1) / BLOCK_SIZE;
         init_rng<<<numBlocks, BLOCK_SIZE>>>(rng_states, 1, num_rng_states);
 
         HaltonState<Robot> *halton_states;
-        cudaMalloc(&halton_states, NUM_NEW_CONFIGS * sizeof(HaltonState<Robot>));
-        int numBlocks1 = (NUM_NEW_CONFIGS + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        cudaMalloc(&halton_states, settings.num_new_configs * sizeof(HaltonState<Robot>));
+        int numBlocks1 = (settings.num_new_configs + BLOCK_SIZE - 1) / BLOCK_SIZE;
         init_halton<Robot><<<numBlocks1, BLOCK_SIZE>>>(halton_states, rng_states);
 
         // free index for next available position in tree_a and tree_b
@@ -734,7 +679,7 @@ namespace pRRTC {
         auto start_time = std::chrono::steady_clock::now();
         
         // std::cout << "iter: " << iter << "\n";
-        rrtc<Robot><<<NUM_NEW_CONFIGS, GRANULARITY>>> (
+        rrtc<Robot><<<settings.num_new_configs, settings.granularity>>> (
             d_nodes,
             d_parents,
             d_radii,
@@ -805,7 +750,7 @@ namespace pRRTC {
         return res;
     }
 
-    template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&);
-    template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&);
-    template PlannerResult<typename ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&);
+    template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
+    template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
+    template PlannerResult<typename ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
 }

@@ -5,6 +5,7 @@
 #include "src/collision/environment.hh"
 #include "src/collision/factory.hh"
 #include "src/planning/Planners.hh"
+#include "src/planning/pRRTC_settings.hh"
 
 using json = nlohmann::json;
 
@@ -113,7 +114,11 @@ int main(int argc, char* argv[]) {
     printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
     Configuration start = data["start"];
     std::vector<Configuration> goals = data["goals"];
-    auto result = pRRTC::solve<Robot>(start, goals, env);
+    struct pRRTC_settings settings;
+    settings.range = 1.0;
+    settings.granularity = 256;
+    settings.balance = true;
+    auto result = pRRTC::solve<Robot>(start, goals, env, settings);
     if (not result.solved) {
         failed ++;
         std::cout << "failed " << name << std::endl;
