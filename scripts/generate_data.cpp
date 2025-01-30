@@ -1,6 +1,9 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
+#include <chrono>
+#include <thread>
+
 
 #include "src/collision/environment.hh"
 #include "src/collision/factory.hh"
@@ -118,10 +121,8 @@ void print_planner_result_to_file(PlannerResult<Robot> &result, pRRTC_settings &
 
 
 template<typename Robot>
-void run_planning(const json &problems, pRRTC_settings &settings, std::string run_name, std::string robot_name) {
+void run_planning(const json &problems, pRRTC_settings &settings, std::ofstream &outfile) {
     using Configuration = typename Robot::Configuration;
-    std::ofstream outfile("test_output/"+robot_name+"_"+run_name+".csv");
-    print_csv_header(outfile);
 
     int failed = 0;
     std::map<std::string, std::vector<PlannerResult<Robot>>> results;
@@ -144,10 +145,13 @@ void run_planning(const json &problems, pRRTC_settings &settings, std::string ru
                 continue;
             }
             auto env = problem_dict_to_env(data, name);
-            printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
+            // printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
             Configuration start = data["start"];
             std::vector<Configuration> goals = data["goals"];
+            struct pRRTC_settings settings;
+            std::cout << "starting kernel" << std::endl;
             auto result = pRRTC::solve<Robot>(start, goals, env, settings);
+            std::cout << "finished kernel" << std::endl;
             for (auto& cfg: result.path) {
                 print_cfg<Robot>(cfg);
             }
@@ -200,35 +204,63 @@ int main(int argc, char* argv[]) {
     std::string robot_name = "panda";
     std::string run_name;
     pRRTC_settings settings;
-    // 2, 128, 0.5, 1, 0
-    settings.num_new_configs = 2;
-    settings.granularity = 128;
-    settings.range = 0.5;
-    settings.balance = 1;
-    settings.tree_ratio = 0.5;
-    settings.dynamic_domain = true;
-    
+    /*
+    Settings to search for the big run:
+    num_new_configs {2, 32, 64, 128, 256, 512, 1024}
+    granularity {64, 128, 256, 512}
+    range {0.5, 1.0, 1.5, 2.0}
+    balance {0, 1, 2}
+    dynamic_domain {0, 1}
+    robot {panda, fetch}
+    */
+    std::vector<int> num_new_configs = {2, 64, 256, 512, 1024};
+    std::vector<int> granularity = {128, 256, 512};
+    std::vector<float> range = {0.5, 1.0, 1.5, 2.0};
+    std::vector<int> balance = {1, 2};
+    std::vector<bool> dynamic_domain = {false, true};
+    std::vector<std::string> robot_names = {"panda", "fetch"};
 
-    if (argc == 3) {
-        robot_name = argv[1];
-        run_name = argv[2];
-    }
-    else {
-        std::cout << "Usage: evaluate_mbm <robot_name> <run_name>\n";
-        return -1;
-    }
+    // run each combination of settings and output it all to one file
+    std::ofstream outfile("generate_data_1.csv");
+    std::cout << std::nounitbuf;
+    // outfile << std::nounitbuf;
+    outfile.rdbuf()->pubsetbuf(0, 0);
 
-    std::string path = "scripts/" + robot_name + "_problems.json";
-    std::ifstream f(path);
-    json all_data = json::parse(f);
-    json problems = all_data["problems"];
-    if (robot_name == "fetch") {
-        run_planning<robots::Fetch>(problems, settings, run_name, robot_name);
-    } else if (robot_name == "panda") {
-        run_planning<robots::Panda>(problems, settings, run_name, robot_name);
-    } else {
-        std::cerr << "Unsupported robot type: " << robot_name << "\n";
-        return 1;
+    print_csv_header(outfile);
+    for (auto& robot_name : robot_names) {
+        std::string path = "scripts/" + robot_name + "_problems.json";
+        std::ifstream problems_in(path);
+        json all_data = json::parse(problems_in);
+        json problems = all_data["problems"];
+        problems_in.close();
+        for (auto& num_new_configs : num_new_configs) {
+            for (auto& granularity : granularity) {
+                for (auto& range : range) {
+                    for (auto& balance : balance) {
+                        for (bool dynamic_domain : dynamic_domain) {
+                            std::cout << "running " << robot_name << " with settings: " << num_new_configs << ", " << granularity << ", " << range << ", " << balance << ", " << dynamic_domain << std::endl;
+                            std::this_thread::sleep_for(std::chrono::seconds(5));
+                            settings.num_new_configs = num_new_configs;
+                            settings.granularity = granularity;
+                            settings.range = range;
+                            settings.balance = balance;
+                            settings.dynamic_domain = dynamic_domain;
+                            if (balance == 1) {
+                                settings.tree_ratio = 0.5;
+                            } else {
+                                settings.tree_ratio = 1.0;
+                            }
+                            if (robot_name == "panda") {
+                                run_planning<robots::Panda>(problems, settings, outfile);
+                            } else if (robot_name == "fetch") {
+                                run_planning<robots::Fetch>(problems, settings, outfile);
+                            }
+                            // outfile.flush();
+                        }
+                    }
+                }
+            }
+        }
     }
+    outfile.close();
 }
-// 2, 128, 1, 2, 1

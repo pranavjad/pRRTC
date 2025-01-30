@@ -115,9 +115,12 @@ int main(int argc, char* argv[]) {
     Configuration start = data["start"];
     std::vector<Configuration> goals = data["goals"];
     struct pRRTC_settings settings;
-    settings.range = 1.0;
-    settings.granularity = 256;
-    settings.balance = true;
+    settings.num_new_configs = 64;
+    settings.granularity = 128;
+    settings.range = 0.5;
+    settings.balance = 1;
+    settings.tree_ratio = 0.5;
+    settings.dynamic_domain = 1;
     auto result = pRRTC::solve<Robot>(start, goals, env, settings);
     if (not result.solved) {
         failed ++;

@@ -11,13 +11,14 @@
 template <typename Robot>
 struct PlannerResult {
     bool solved = false;
-    std::vector<int> path; // path found by planner by node index
-    std::vector<typename Robot::Configuration> nodes; // all nodes in the RRT
-    int tree_size = 0;
+    std::vector<typename Robot::Configuration> path; 
+    int start_tree_size = 0;
+    int goal_tree_size = 0;
+    int path_length = 0;
     int iters = 0;
     float cost = 0.0;
-    std::size_t nanoseconds = 0;
-    std::size_t attempted_tree_size = 0;
+    std::size_t wall_ns = 0;
+    std::size_t kernel_ns = 0;
 };
 
 template <typename Robot>
@@ -33,7 +34,15 @@ inline float l2dist(typename Robot::Configuration &a, typename Robot::Configurat
 }
 
 template <typename Robot>
-inline void print_cfg(float *config) {
+inline void print_cfg_ptr(float *config) {
+    for (int i = 0; i < Robot::dimension; i++) {
+        std::cout << config[i] << " ";
+    }
+    std::cout << "\n";
+}
+
+template <typename Robot>
+inline void print_cfg(typename Robot::Configuration &config) {
     for (int i = 0; i < Robot::dimension; i++) {
         std::cout << config[i] << " ";
     }

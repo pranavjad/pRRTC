@@ -8,3 +8,5 @@ Pipfile
 Pipfile.lock
 test_output
 plots
+*.csv
+.python-version
