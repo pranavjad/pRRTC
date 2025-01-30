@@ -439,9 +439,9 @@ namespace pRRTC {
                     if (index >= d_settings.max_samples) solved = -1;
                     
                     t_parents[index] = sindex[0];
-                    radii[t_tree_id][index] = FLT_MAX;
-
+                    
                     if (d_settings.dynamic_domain) {
+                        radii[t_tree_id][index] = FLT_MAX;
                         float *radius_ptr = &radii[t_tree_id][sindex[0]];
                         float old_radius, new_radius;
                         int expected, desired;
@@ -489,7 +489,6 @@ namespace pRRTC {
                 
                 if (tid == 0) {
                     sdata[0] = sqrt(sdata[0]);
-                    // scale = min(1.0f, RRT_RADIUS / sdata[0]);
                     nearest_node = &o_nodes[sindex[0] * dim];
                     n_extensions = ceil(sdata[0] / d_settings.range);
                     local_cc_result[0] = 0;
@@ -575,16 +574,7 @@ namespace pRRTC {
                 }
                 // printf("here8\n");
             }
-            else if (d_settings.dynamic_domain && tid == 0) {
-                // float old_radius = radii[t_tree_id][sindex[0]];
-                // float new_radius;
-                // if (old_radius == FLT_MAX) {
-                //     new_radius = d_settings.dd_radius;
-                // } else {
-                //     new_radius = fmaxf(old_radius * (1.f - d_settings.dd_alpha), d_settings.dd_min_radius);
-                // }
-                // atomicExch(&radii[t_tree_id][sindex[0]], new_radius);
-                
+            else if (d_settings.dynamic_domain && tid == 0) {         
                 float *radius_ptr = &radii[t_tree_id][sindex[0]];
                 float old_radius, new_radius;
                 int expected, desired;
@@ -705,21 +695,19 @@ namespace pRRTC {
             rng_states,
             env
         );
-        cudaCheckError(cudaGetLastError());
         cudaDeviceSynchronize();
-        // std::cout << "here8" << std::endl;
         res.kernel_ns = get_elapsed_nanoseconds(kernel_start_time);
+        cudaCheckError(cudaGetLastError());
+        
+        // std::cout << "here8" << std::endl;
+        
 
         cudaMemcpyFromSymbol(current_samples, atomic_free_index, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
-        cudaCheckError(cudaGetLastError());
         cudaMemcpyFromSymbol(h_solved, solved, sizeof(int), 0, cudaMemcpyDeviceToHost);
-        cudaCheckError(cudaGetLastError());
         cudaMemcpyFromSymbol(&h_solved_iters, solved_iters, sizeof(int), 0, cudaMemcpyDeviceToHost);
-        cudaCheckError(cudaGetLastError());
 
         // currently, iteration count is not copied because each block may have different iteration count
         if (*h_solved!=1) *h_solved=0;
-        cudaCheckError(cudaGetLastError());
         std::cout << "current_samples: start: " << current_samples[0] << ", goal: " << current_samples[1] << "\n";
         std::cout << "solved iters: " << h_solved_iters << "\n";
         res.start_tree_size = current_samples[0];
@@ -756,7 +744,6 @@ namespace pRRTC {
             res.path_length = (h_path_size[0] + h_path_size[1]);
             std::cout << "cost: " << res.cost << "\n";
         }
-        cudaCheckError(cudaGetLastError());
         res.solved = (*h_solved) != 0;
         res.iters = h_solved_iters;
         

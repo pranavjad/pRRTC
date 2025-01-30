@@ -148,13 +148,19 @@ void run_planning(const json &problems, pRRTC_settings &settings, std::ofstream 
             // printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
             Configuration start = data["start"];
             std::vector<Configuration> goals = data["goals"];
-            struct pRRTC_settings settings;
-            std::cout << "starting kernel" << std::endl;
-            auto result = pRRTC::solve<Robot>(start, goals, env, settings);
-            std::cout << "finished kernel" << std::endl;
-            for (auto& cfg: result.path) {
-                print_cfg<Robot>(cfg);
+            // std::cout << "starting kernel" << std::endl;
+            PlannerResult<Robot> result;
+            try {
+                result = pRRTC::solve<Robot>(start, goals, env, settings);
             }
+            catch (const std::exception& e) {
+                std::cout << "Error on problem " << name << " idx " << i << std::endl;
+                std::cerr << "Error: " << e.what() << std::endl;
+            }
+            // std::cout << "finished kernel" << std::endl;
+            // for (auto& cfg: result.path) {
+            //     print_cfg<Robot>(cfg);
+            // }
             if (not result.solved) {
                 failed ++;
                 std::cout << "failed " << name << std::endl;
@@ -213,15 +219,15 @@ int main(int argc, char* argv[]) {
     dynamic_domain {0, 1}
     robot {panda, fetch}
     */
-    std::vector<int> num_new_configs = {2, 64, 256, 512, 1024};
-    std::vector<int> granularity = {128, 256, 512};
-    std::vector<float> range = {0.5, 1.0, 1.5, 2.0};
+    std::vector<int> num_new_configs = {64, 256, 512, 768};
+    std::vector<int> granularity = {128, 256};
+    std::vector<float> range = {0.5, 1.0, 2.0};
     std::vector<int> balance = {1, 2};
     std::vector<bool> dynamic_domain = {false, true};
     std::vector<std::string> robot_names = {"panda", "fetch"};
 
     // run each combination of settings and output it all to one file
-    std::ofstream outfile("generate_data_1.csv");
+    std::ofstream outfile("generate_data_2.csv");
     std::cout << std::nounitbuf;
     // outfile << std::nounitbuf;
     outfile.rdbuf()->pubsetbuf(0, 0);
@@ -255,7 +261,6 @@ int main(int argc, char* argv[]) {
                             } else if (robot_name == "fetch") {
                                 run_planning<robots::Fetch>(problems, settings, outfile);
                             }
-                            // outfile.flush();
                         }
                     }
                 }
