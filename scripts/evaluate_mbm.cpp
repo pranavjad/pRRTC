@@ -207,6 +207,7 @@ int main(int argc, char* argv[]) {
     settings.balance = 1;
     settings.tree_ratio = 0.5;
     settings.dynamic_domain = true;
+    // settings.dd_min_radius = settings.range / 2.0f;
     
 
     if (argc == 3) {

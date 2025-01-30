@@ -325,14 +325,13 @@ namespace pRRTC {
         int iter = 0;
 
         while (true) {
+            if (solved != 0) return;
             if (tid == 0) {
-                printf("iter: %d, bid: %d\n", iter, bid);
-                if (solved != 0) return;
+                // printf("iter: %d, bid: %d\n", iter, bid);
                 iter++;
-                if (iter > d_settings.max_iters && atomicCAS((int *)&solved, 0, -1) == 0) {
-                    return;
+                if (iter > d_settings.max_iters) {
+                    atomicCAS((int *)&solved, 0, -1);
                 }
-                // t_tree_id = 0;
 
                 if (d_settings.balance == 0 || iter == 1) {
                     t_tree_id = (bid < (d_settings.num_new_configs / 2))? 0 : 1;
@@ -369,7 +368,7 @@ namespace pRRTC {
                 local_cc_result[0] = 0;
             }
             __syncthreads();
-            
+            if (solved != 0) return;
 
             // divide up the work of finding nearest neighbor among the threads
             float local_min_dist = INFINITY;
@@ -407,8 +406,8 @@ namespace pRRTC {
                 sdata[0] = sqrt(sdata[0]);
                 scale = min(1.0f, d_settings.range / (sdata[0]));
                 nearest_node = &t_nodes[sindex[0] * dim];
-                float nearest_radius = radii[t_tree_id][sindex[0]];
-                should_skip = (d_settings.dynamic_domain && nearest_radius < sdata[0]);
+                should_skip = (d_settings.dynamic_domain && radii[t_tree_id][sindex[0]] < sdata[0]);
+                // printf("calculate extension\n");
             }
             __syncthreads();
 
@@ -437,12 +436,23 @@ namespace pRRTC {
                 /* grow tree */
                 if (tid == 0) {
                     index = atomicAdd((int *)&atomic_free_index[t_tree_id], 1);
-                    if (index >= d_settings.max_samples) solved=-1;
+                    if (index >= d_settings.max_samples) solved = -1;
+                    
                     t_parents[index] = sindex[0];
                     radii[t_tree_id][index] = FLT_MAX;
-                    float nearest_radius = radii[t_tree_id][sindex[0]];
-                    if (d_settings.dynamic_domain && nearest_radius != FLT_MAX) {
-                        radii[t_tree_id][sindex[0]] *= (1 + d_settings.dd_alpha);
+
+                    if (d_settings.dynamic_domain) {
+                        float *radius_ptr = &radii[t_tree_id][sindex[0]];
+                        float old_radius, new_radius;
+                        int expected, desired;
+                        do {
+                            // printf("dynamic domain loop 1\n");
+                            old_radius = *radius_ptr;
+                            if (old_radius == FLT_MAX) break;
+                            new_radius = old_radius * (1 + d_settings.dd_alpha);
+                            expected = __float_as_int(old_radius);
+                            desired = __float_as_int(new_radius);
+                        } while (atomicCAS(reinterpret_cast<int*>(radius_ptr), expected, desired) != expected);
                     }
                 }
                 __syncthreads();
@@ -483,6 +493,7 @@ namespace pRRTC {
                     nearest_node = &o_nodes[sindex[0] * dim];
                     n_extensions = ceil(sdata[0] / d_settings.range);
                     local_cc_result[0] = 0;
+                    // printf("found closest in other tree\n");
                 }
                 __syncthreads();
 
@@ -512,6 +523,7 @@ namespace pRRTC {
                         radii[t_tree_id][index] = FLT_MAX;
                         extension_parent_idx = index;
                         local_cc_result[0] = 0;
+                        // printf("in extension loop\n");
                     }
                     __syncthreads();
                     if (tid < dim) {
@@ -524,7 +536,7 @@ namespace pRRTC {
                 }
                 if (i_extensions == n_extensions) { // connected
                     if (tid == 0 && atomicCAS((int *)&solved, 0, 1) == 0) {
-
+                        // printf("in connected\n");
                         // trace back to the start and goal.
                         int current = index;
                         int parent;
@@ -557,31 +569,40 @@ namespace pRRTC {
                         path_size[t_tree_id] = t_path_size;
                         path_size[o_tree_id] = o_path_size;
                         solved_iters = iter;
-                        return;
+                        // return;
                     }
                     __syncthreads();
                 }
                 // printf("here8\n");
             }
-            else if (d_settings.dynamic_domain) {
-                if (tid == 0) {
-                    float nearest_radius = radii[t_tree_id][sindex[0]];
-                    if (nearest_radius == FLT_MAX)
-                    {
-                        radii[t_tree_id][sindex[0]] = d_settings.dd_radius;
+            else if (d_settings.dynamic_domain && tid == 0) {
+                // float old_radius = radii[t_tree_id][sindex[0]];
+                // float new_radius;
+                // if (old_radius == FLT_MAX) {
+                //     new_radius = d_settings.dd_radius;
+                // } else {
+                //     new_radius = fmaxf(old_radius * (1.f - d_settings.dd_alpha), d_settings.dd_min_radius);
+                // }
+                // atomicExch(&radii[t_tree_id][sindex[0]], new_radius);
+                
+                float *radius_ptr = &radii[t_tree_id][sindex[0]];
+                float old_radius, new_radius;
+                int expected, desired;
+                do {
+                    // printf("in d settings end\n");
+                    old_radius = *radius_ptr;
+                    if (old_radius == FLT_MAX) {
+                        new_radius = d_settings.dd_radius;
+                    } else {
+                        new_radius = fmaxf(old_radius * (1.f - d_settings.dd_alpha), d_settings.dd_min_radius);
                     }
-                    else
-                    {
-                        radii[t_tree_id][sindex[0]] = max(radii[t_tree_id][sindex[0]] * (1.F - d_settings.dd_alpha), d_settings.dd_min_radius);
-                    }
-                }
-                __syncthreads();
+                    expected = __float_as_int(old_radius);
+                    desired = __float_as_int(new_radius);
+                } while (atomicCAS(reinterpret_cast<int*>(radius_ptr), expected, desired) != expected);
             }
             __syncthreads();
             if (solved != 0) return;
         }
-        
-        
     }
 
 
@@ -595,9 +616,9 @@ namespace pRRTC {
         pRRTC_settings &settings
     ) 
     {
-        std::cout << "here" << std::endl;
+        // std::cout << "here" << std::endl;
         cudaSetDevice(1);
-        std::cout << "here1" << std::endl;
+        // std::cout << "here1" << std::endl;
         auto start_time = std::chrono::steady_clock::now();
         static constexpr auto dim = Robot::dimension;
         std::size_t iter = 0;
@@ -608,7 +629,7 @@ namespace pRRTC {
         // copy data to GPU
         cudaMemcpyToSymbol(d_settings, &settings, sizeof(settings));
 
-        std::cout << "here2" << std::endl;
+        // std::cout << "here2" << std::endl;
         int num_goals = goals.size();
         float *nodes[2];
         int *parents[2];
@@ -630,7 +651,7 @@ namespace pRRTC {
         cudaMemcpy(d_parents, parents, 2 * sizeof(int*), cudaMemcpyHostToDevice);
         cudaMemcpy(d_radii, radii, 2 * sizeof(float*), cudaMemcpyHostToDevice);
 
-        std::cout << "here3" << std::endl;
+        // std::cout << "here3" << std::endl;
 
         // add start to tree_a and goals to tree_b
         cudaMemcpy(nodes[0], start.data(), config_size, cudaMemcpyHostToDevice);
@@ -645,7 +666,7 @@ namespace pRRTC {
         std::vector<float> radii_init(num_goals, FLT_MAX);
         cudaMemcpy(radii[0], radii_init.data(), sizeof(float), cudaMemcpyHostToDevice);
         cudaMemcpy(radii[1], radii_init.data(), sizeof(float) * num_goals, cudaMemcpyHostToDevice);
-        std::cout << "here4" << std::endl;
+        // std::cout << "here4" << std::endl;
         // create a curandState for each thread -> holds state of RNG for each thread seperately
         // For growing the tree we will create NUM_NEW_CONFIGS threads
         curandState *rng_states;
@@ -662,11 +683,11 @@ namespace pRRTC {
         // free index for next available position in tree_a and tree_b
         int h_free_index[2] = {1, num_goals};
         cudaMemcpyToSymbol(atomic_free_index, &h_free_index, sizeof(int) * 2);
-        std::cout << "here5" << std::endl;
+        // std::cout << "here5" << std::endl;
         // allocate for obstacles
         ppln::collision::Environment<float> *env;
         setup_environment_on_device(env, h_environment);
-        std::cout << "here6" << std::endl;
+        // std::cout << "here6" << std::endl;
         cudaCheckError(cudaGetLastError());
         // Setup pinned memory for signaling
         int *h_solved;
@@ -674,7 +695,7 @@ namespace pRRTC {
         int h_solved_iters = -1;
         cudaMallocHost(&h_solved, sizeof(int));  // Pinned memory
         *h_solved = 0;
-        std::cout << "here7" << std::endl;
+        // std::cout << "here7" << std::endl;
         auto kernel_start_time = std::chrono::steady_clock::now();
         rrtc<Robot><<<settings.num_new_configs, settings.granularity>>> (
             d_nodes,
@@ -686,7 +707,7 @@ namespace pRRTC {
         );
         cudaCheckError(cudaGetLastError());
         cudaDeviceSynchronize();
-        std::cout << "here8" << std::endl;
+        // std::cout << "here8" << std::endl;
         res.kernel_ns = get_elapsed_nanoseconds(kernel_start_time);
 
         cudaMemcpyFromSymbol(current_samples, atomic_free_index, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
