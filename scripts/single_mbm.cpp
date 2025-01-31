@@ -120,12 +120,16 @@ int main(int argc, char* argv[]) {
     settings.range = 0.5;
     settings.balance = 1;
     settings.tree_ratio = 0.5;
-    settings.dynamic_domain = 1;
+    settings.dynamic_domain = false;
     auto result = pRRTC::solve<Robot>(start, goals, env, settings);
+    for (auto& cfg: result.path) {
+        print_cfg<Robot>(cfg);
+    }
     if (not result.solved) {
         failed ++;
         std::cout << "failed " << name << std::endl;
     }
     std::cout << "cost: " << result.cost << "\n";
+    std::cout << "time (us): " << result.kernel_ns/1000 << "\n";
     results[name].emplace_back(result);
 }

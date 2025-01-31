@@ -289,7 +289,9 @@ namespace pRRTC {
     }
     
     template <typename Robot>
-    __global__ void rrtc(
+    __global__ void
+    __launch_bounds__(128, 8)
+    rrtc(
         float **nodes,
         int **parents,
         float **radii,
@@ -325,7 +327,7 @@ namespace pRRTC {
         int iter = 0;
 
         while (true) {
-            if (solved != 0) return;
+            // if (solved != 0) return;
             if (tid == 0) {
                 // printf("iter: %d, bid: %d\n", iter, bid);
                 iter++;
@@ -684,7 +686,7 @@ namespace pRRTC {
         int current_samples[2];
         int h_solved_iters = -1;
         cudaMallocHost(&h_solved, sizeof(int));  // Pinned memory
-        *h_solved = 0;
+        *h_solved = -1;
         // std::cout << "here7" << std::endl;
         auto kernel_start_time = std::chrono::steady_clock::now();
         rrtc<Robot><<<settings.num_new_configs, settings.granularity>>> (

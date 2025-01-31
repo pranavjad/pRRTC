@@ -151,6 +151,7 @@ void run_planning(const json &problems, pRRTC_settings &settings, std::string ru
             for (auto& cfg: result.path) {
                 print_cfg<Robot>(cfg);
             }
+            std::cout << "kernel_ns: " << result.kernel_ns << "\n";
             if (not result.solved) {
                 failed ++;
                 std::cout << "failed " << name << std::endl;
@@ -201,9 +202,9 @@ int main(int argc, char* argv[]) {
     std::string run_name;
     pRRTC_settings settings;
     // 2, 128, 0.5, 1, 0
-    settings.num_new_configs = 512;
+    settings.num_new_configs = 600;
     settings.granularity = 128;
-    settings.range = 0.5;
+    settings.range = 1.0;
     settings.balance = 1;
     settings.tree_ratio = 0.5;
     settings.dynamic_domain = false;
