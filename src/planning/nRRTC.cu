@@ -33,6 +33,7 @@ namespace nRRTC {
 
     constexpr int MAX_GRANULARITY = 256;
     constexpr int BLOCK_SIZE = 64;
+    constexpr int MAX_TREE_SIZE = (10000000 / 256);
 
     // Constants
     __constant__ float primes[16] = {
@@ -304,8 +305,10 @@ namespace nRRTC {
 
         int t_tree_id = 0;
         int o_tree_id = 1 - t_tree_id;
-        float *t_nodes = nodes[t_tree_id];
-        float *o_nodes = nodes[o_tree_id];
+        float *t_nodes = &nodes[t_tree_id][tree_idx * MAX_TREE_SIZE * dim];
+        float *o_nodes = &nodes[o_tree_id][tree_idx * MAX_TREE_SIZE * dim];
+        float *t_parents = &parents[t_tree_id][tree_idx * MAX_TREE_SIZE];
+        float *o_parents = &parents[o_tree_id][tree_idx * MAX_TREE_SIZE];
         unsigned int iter = 0;
         while (solved == 0) {
             iter ++;
@@ -319,8 +322,9 @@ namespace nRRTC {
                 {
                     t_tree_id = 1 - t_tree_id;
                     o_tree_id = 1 - t_tree_id;
-                    t_nodes = nodes[t_tree_id];
-                    o_nodes = nodes[o_tree_id];
+                    float *temp = t_nodes;
+                    t_nodes = o_nodes;
+                    o_nodes = t_nodes;
                 }
             }
 
@@ -335,8 +339,8 @@ namespace nRRTC {
             float min_dist = FLT_MAX;
             int min_index = -1;
             float dist;
-            for (unsigned int i = 0; i < free_index[t_tree_id]; i += 32) {
-                dist = device_utils::sq_l2_dist(&t_nodes[i], &config[wid], dim);
+            for (unsigned int i = lid; i < free_index[t_tree_id]; i += 32) {
+                dist = device_utils::sq_l2_dist(&t_nodes[i * dim], &config[wid], dim);
                 if (dist < min_dist) {
                     min_dist = dist;
                     min_index = i;
@@ -347,11 +351,11 @@ namespace nRRTC {
                 min_dist = min(min_dist, __shfl_down_sync(FULL_MASK, min_dist, offset));
                 min_index = (min_dist == __shfl_down_sync(FULL_MASK, min_dist, offset)) ? __shfl_down_sync(FULL_MASK, min_index, offset) : min_index;
             }
-            __syncwarp();
-
+            __shfl_sync(FULL_MASK, min_dist, 0);
+            __shfl_sync(FULL_MASK, min_index, 0);
             min_dist = sqrt(min_dist);
             scale = min(1.0f, d_settings.range / min_dist);
-            nearest_node = &t_nodes[min_index * dim]
+            nearest_node = &t_nodes[min_index * dim];
 
             if (lid < dim) {
                 config[wid][lid] = (1 - scale) * nearest_node[lid] + scale * config[wid][lid];
@@ -361,17 +365,134 @@ namespace nRRTC {
 
             /* validate edge to config*/
             float interp_cfg[dim];
+            bool config_in_collision = false;
             for (unsigned int i = lid; i < d_settings.granularity; i+=32) {
                 if (i + lid < d_settings.granularity) {
                     for (unsigned int j = 0; j < dim; j++) {
                         interp_cfg[j] = nearest_node[j] + delta[wid][j] * (i + lid);
                     }
-                    bool cfg_in_collision = bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid, local_cc_result);
-
+                    bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid, local_cc_result);
+                    __syncwarp();
+                    for (unsigned int offset = 16; offset > 0; offset /= 2) {
+                        config_in_collision = config_in_collision || __shfl_down_sync(FULL_MASK, config_in_collision, offset);
+                    }
+                    __shfl_sync(FULL_MASK, config_in_collision, 0);
+                    if (config_in_collision) break;
                 }
             }
 
+            /* add new config to this tree */
+            if (!config_in_collision) {
+                unsigned int index = free_index[wid][t_tree_id];
+                if (lid == 0) {
+                    if (index >= d_settings.max_samples) {
+                        atomicCAS((int *)&solved, 0, -1);
+                    }
+                    free_index[wid][t_tree_id] = index + 1;
+                    t_parents[index] = min_index;
+                }
+                if (lid < dim) {
+                    t_nodes[index * dim + lid] = config[wid][lid];
+                }
 
+                /* connect (find nearest node in other tree and attempt connection) */
+                float min_dist = FLT_MAX;
+                int min_index = -1;
+                for (unsigned int i = lid; i < free_index[o_tree_id]; i += 32) {
+                    dist = device_utils::sq_l2_dist(&o_nodes[i * dim], &config[wid], dim);
+                    if (dist < min_dist) {
+                        min_dist = dist;
+                        min_index = i;
+                    }
+                }
+                __syncwarp();
+                for (unsigned int offset = 16; offset > 0; offset /= 2) {
+                    min_dist = min(min_dist, __shfl_down_sync(FULL_MASK, min_dist, offset));
+                    min_index = (min_dist == __shfl_down_sync(FULL_MASK, min_dist, offset)) ? __shfl_down_sync(FULL_MASK, min_index, offset) : min_index;
+                }
+                __shfl_sync(FULL_MASK, min_dist, 0);
+                __shfl_sync(FULL_MASK, min_index, 0);
+                min_dist = sqrt(min_dist)
+                int n_extensions = ceil(min_dist / d_settings.range);
+
+                if (lid < dim) {
+                    delta[wid][lid] = (o_nodes[min_index * dim + lid] - config[wid][lid]) / (float) n_extensions;
+                }
+                __syncwarp();
+
+                /* extend as far as we can to NN in opposite tree */
+                int i_extensions = 0;
+                int extension_parent_idx = index;
+                while (i_extensions < n_extensions) {
+                    /* collision check the extension */
+                    bool config_in_collision = false;
+                    for (unsigned int i = lid; i < d_settings.granularity; i+=32) {
+                        if (i + lid < d_settings.granularity) {
+                            for (unsigned int j = 0; j < dim; j++) {
+                                interp_cfg[j] = config[j] + (delta[wid][j] * (i + lid));
+                            }
+                            config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid, local_cc_result);
+                            __syncwarp();
+                            for (unsigned int offset = 16; offset > 0; offset /= 2) {
+                                config_in_collision = config_in_collision || __shfl_down_sync(FULL_MASK, config_in_collision, offset);
+                            }
+                            __shfl_sync(FULL_MASK, config_in_collision, 0);
+                            if (config_in_collision) break;
+                        }
+                        __syncwarp();
+                    }
+                    if (config_in_collision) break;
+                    /* add extended config to tree */
+                    if (lid == 0) {
+                        unsigned int index = free_index[wid][t_tree_id];
+                        if (index >= d_settings.max_samples) {
+                            atomicCAS((int *)&solved, 0, -1);
+                        }
+                        free_index[wid][t_tree_id] = index + 1;
+                        t_parents[index] = extension_parent_idx;
+                        extension_parent_idx = index;
+                    }
+                    if (lid < dim) {
+                        config[wid][lid] = config[wid][lid] + delta[wid][lid];
+                        t_nodes[index * dim + lid] = interp_cfg[lid];
+                    }
+                    i_extensions ++;
+                    __syncwarp();
+                }
+                /* check if we reached the goal */
+                if (i_extensions == n_extensions) {
+                    if (lid == 0 && atomicCAS((int *)&solved, 0, 1) == 0) {
+                        // trace back to the start and goal.
+                        int current = index;
+                        int parent;
+                        int t_path_size = 0;
+                        int o_path_size = 0;
+                        while (t_parents[current] != current) {
+                            parent = t_parents[current];
+                            cost += device_utils::l2_dist(&t_nodes[current * dim], &t_nodes[parent * dim], dim);
+                            for (int i = 0; i < dim; i++) path[t_tree_id][t_path_size * dim + i] = t_nodes[current * dim + i];
+                            t_path_size++;
+                            current = parent;
+                            
+                        }
+                        if (t_tree_id == 1) reached_goal_idx = current;
+                        current = min_index;
+                        while (o_parents[current] != current) {
+                            parent = o_parents[current];
+                            cost += device_utils::l2_dist(&o_nodes[current * dim], &o_nodes[parent * dim], dim);
+                            for (int i = 0; i < dim; i++) path[o_tree_id][o_path_size * dim + i] = o_nodes[current * dim + i];
+                            o_path_size++;
+                            current = parent;
+                        }
+                        if (t_tree_id == 0) reached_goal_idx = current;
+                        path_size[t_tree_id] = t_path_size;
+                        path_size[o_tree_id] = o_path_size;
+                        solved_iters = iter;
+                    }
+                    __syncwarp();
+                }
+            }
+            if (solved != 0) break;
         }
     }
 
