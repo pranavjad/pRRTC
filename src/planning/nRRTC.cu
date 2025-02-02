@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <numeric>
 
+#define FULL_MASK 0xffffffff
+
 /*
 Parallelized RRTC:
 Each warp grows it's own tree.
@@ -23,7 +25,7 @@ Each warp grows it's own tree.
 namespace nRRTC {
     using namespace ppln;
     __device__ volatile int solved = 0;
-    __device__ int atomic_free_index[512][2]; // up to 512 trees, each tree has a free index for it's tree_a and tree_b
+    __device__ int solved_free_index[2] = {0, 0};
     __device__ float path[2][500]; // solution path segments for tree_a, and tree_b
     __device__ int path_size[2] = {0, 0};
     __device__ float cost = 0.0;
@@ -31,9 +33,10 @@ namespace nRRTC {
     __device__ int solved_iters = 0; // value of iters in the block that solves the problem
     __constant__ pRRTC_settings d_settings;
 
-    constexpr int MAX_GRANULARITY = 256;
+    // constexpr int MAX_GRANULARITY = 256;
     constexpr int BLOCK_SIZE = 64;
-    constexpr int MAX_TREE_SIZE = (10000000 / 256);
+    constexpr int NUM_TREES = 2;
+    constexpr int MAX_TREE_SIZE = (10000000 / NUM_TREES);
 
     // Constants
     __constant__ float primes[16] = {
@@ -253,9 +256,6 @@ namespace nRRTC {
     __global__ void reset_device_variables_kernel() {
         solved = 0;
         
-        atomic_free_index[0] = 0;
-        atomic_free_index[1] = 0;
-        
         path_size[0] = 0;
         path_size[1] = 0;
         
@@ -280,36 +280,47 @@ namespace nRRTC {
     
     /* each warp handles a separate RRTC tree, 32 threads grow the tree 1 at a time*/
     // 64 blocks, 128 threads per block, 4 warps per block, 256 trees total
+    // 
     template <typename Robot>
     __global__ void
-    __launch_bounds__(128, 8)
+    // __launch_bounds__(128, 8)
     rrtc(
         float **nodes,
         int **parents,
         float **radii,
         HaltonState<Robot> *halton_states,
         curandState *rng_states,
-        ppln::collision::Environment<float> *env
+        ppln::collision::Environment<float> *env,
+        int num_goals
     )
     {
         static constexpr auto dim = Robot::dimension;
         const int tid = blockIdx.x * blockDim.x + threadIdx.x; // global thread id
         const int lid = threadIdx.x % 32; // lane id
-        const int wid = tid / 32; // warp id
+        const int wid = threadIdx.x / 32; // warp id
         const int bid = blockIdx.x; // block id
         const int tree_idx = bid * 4 + wid;
+        if (tree_idx >= NUM_TREES) return;
         __shared__ float config[4][dim]; // new config for each tree
-        __shared__ unsigned int free_index[4][2]; // free indexes for each tree
+        __shared__ int free_index[4][2]; // free indexes for each tree
         __shared__ float delta[4][dim]; // delta for each tree
         __shared__ float var_cache[256][10]; // cache for forward kinematics
 
         int t_tree_id = 0;
         int o_tree_id = 1 - t_tree_id;
-        float *t_nodes = &nodes[t_tree_id][tree_idx * MAX_TREE_SIZE * dim];
-        float *o_nodes = &nodes[o_tree_id][tree_idx * MAX_TREE_SIZE * dim];
-        float *t_parents = &parents[t_tree_id][tree_idx * MAX_TREE_SIZE];
-        float *o_parents = &parents[o_tree_id][tree_idx * MAX_TREE_SIZE];
+        float *t_nodes = nodes[t_tree_id] + (tree_idx * MAX_TREE_SIZE * dim);
+        float *o_nodes = nodes[o_tree_id] + (tree_idx * MAX_TREE_SIZE * dim);
+        if (tid == 0) {
+            printf("here\n");
+        }
+        int *t_parents = parents[t_tree_id] + (tree_idx * MAX_TREE_SIZE);
+        int *o_parents = parents[o_tree_id] + (tree_idx * MAX_TREE_SIZE);
         unsigned int iter = 0;
+        if (tid < 4) {
+            free_index[tid][0] = 1;
+            free_index[tid][1] = num_goals;
+        }
+        __syncthreads();
         while (solved == 0) {
             iter ++;
             if (iter > d_settings.max_iters) {
@@ -317,72 +328,129 @@ namespace nRRTC {
             }
 
             if (d_settings.balance == 2) {
-                float ratio = abs(free_index[wid][t_tree_id] - free_index[o_tree_id]) / (float) free_index[t_tree_id];
+                float ratio = abs(free_index[wid][t_tree_id] - free_index[wid][o_tree_id]) / (float) free_index[wid][t_tree_id];
                 if (ratio < d_settings.tree_ratio)
                 {
                     t_tree_id = 1 - t_tree_id;
                     o_tree_id = 1 - t_tree_id;
                     float *temp = t_nodes;
                     t_nodes = o_nodes;
-                    o_nodes = t_nodes;
+                    o_nodes = temp;
                 }
+            }
+            else { // swap every iteration
+                t_tree_id = 1 - t_tree_id;
+                o_tree_id = 1 - t_tree_id;
+                float *temp = t_nodes;
+                t_nodes = o_nodes;
+                o_nodes = temp;
+            }
+
+            if (tid == 0) {
+                printf("iter: %d\n", iter);
+                printf("free_index: %d, %d\n", free_index[wid][0], free_index[wid][1]);
+                printf("t_tree_id: %d, o_tree_id: %d\n", t_tree_id, o_tree_id);
             }
 
             /* sample configuration */
+            // if (lid == 0) {
+            //     halton_next(halton_states[wid], (float *)config[wid]);
+            //     Robot::scale_cfg((float *)config[wid]);
+            //     print_config(config[wid], dim);
+            // }
             if (lid < dim) {
+                // printf("wid: %d, tid: %d, lid: %d\n", wid, tid, lid);
                 config[wid][lid] = curand_uniform(&rng_states[tid]);
-                Robot::scale_config(config[wid]);
+                Robot::scale_cfg(config[wid]);
+                if (tid == 0) {
+                    print_config(config[wid], dim);
+                }
             }
             __syncwarp();
+            if (tid == 0) {
+                printf("here1\n");
+            }
+            __syncthreads();
 
             /* find nearest neighbor */
             float min_dist = FLT_MAX;
             int min_index = -1;
             float dist;
-            for (unsigned int i = lid; i < free_index[t_tree_id]; i += 32) {
-                dist = device_utils::sq_l2_dist(&t_nodes[i * dim], &config[wid], dim);
+            for (unsigned int i = lid; i < free_index[wid][t_tree_id]; i += 32) {
+                // if (tid == 0) {
+                //     printf("i: %d\n", i);
+                //     printf("t_nodes: %f, %f, %f\n", t_nodes[i * dim], t_nodes[i * dim + 1], t_nodes[i * dim + 2]);
+                //     printf("config: %f, %f, %f\n", config[wid][0], config[wid][1], config[wid][2]);
+                //     printf("here2\n");
+                // }
+                // __syncthreads();
+                // printf("i * dim: %d, wid: %d\n", i * dim, wid);
+                dist = device_utils::sq_l2_dist(&t_nodes[i * dim], config[wid], dim);
                 if (dist < min_dist) {
                     min_dist = dist;
                     min_index = i;
                 }
             }
             __syncwarp();
-            for (unsigned int offset = 16; offset > 0; offset /= 2) {
-                min_dist = min(min_dist, __shfl_down_sync(FULL_MASK, min_dist, offset));
-                min_index = (min_dist == __shfl_down_sync(FULL_MASK, min_dist, offset)) ? __shfl_down_sync(FULL_MASK, min_index, offset) : min_index;
+            if (tid == 0) {
+                printf("here3\n");
             }
-            __shfl_sync(FULL_MASK, min_dist, 0);
-            __shfl_sync(FULL_MASK, min_index, 0);
+            __syncthreads();
+            for (unsigned int offset = 16; offset > 0; offset /= 2) {
+                float other_dist = __shfl_down_sync(FULL_MASK, min_dist, offset);
+                int other_index = __shfl_down_sync(FULL_MASK, min_index, offset);
+                if (other_dist < min_dist) {
+                    min_dist = other_dist;
+                    min_index = other_index;
+                }
+            }
+            if (tid == 0) printf("min_dist: %f\n", min_dist);
+            min_dist = __shfl_sync(FULL_MASK, min_dist, 0);
+            min_index = __shfl_sync(FULL_MASK, min_index, 0);
             min_dist = sqrt(min_dist);
-            scale = min(1.0f, d_settings.range / min_dist);
-            nearest_node = &t_nodes[min_index * dim];
-
+            float scale = min(1.0f, d_settings.range / min_dist);
+            float *nearest_node = &t_nodes[min_index * dim];
+            if (tid == 0) {
+                printf("nearest node: ");
+                print_config(nearest_node, dim);
+            }
             if (lid < dim) {
                 config[wid][lid] = (1 - scale) * nearest_node[lid] + scale * config[wid][lid];
                 delta[wid][lid] = (config[wid][lid] - nearest_node[lid]) / d_settings.granularity;
             }
             __syncwarp();
-
+            if (tid == 0) {
+                printf("here4\n");
+            }
             /* validate edge to config*/
             float interp_cfg[dim];
             bool config_in_collision = false;
             for (unsigned int i = lid; i < d_settings.granularity; i+=32) {
-                if (i + lid < d_settings.granularity) {
-                    for (unsigned int j = 0; j < dim; j++) {
-                        interp_cfg[j] = nearest_node[j] + delta[wid][j] * (i + lid);
-                    }
-                    bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid, local_cc_result);
-                    __syncwarp();
-                    for (unsigned int offset = 16; offset > 0; offset /= 2) {
-                        config_in_collision = config_in_collision || __shfl_down_sync(FULL_MASK, config_in_collision, offset);
-                    }
-                    __shfl_sync(FULL_MASK, config_in_collision, 0);
-                    if (config_in_collision) break;
+                if (tid == 0) {
+                    printf("i: %d\n", i);
                 }
+                // printf("lid: %d, wid: %d\n", lid, wid);
+                for (unsigned int j = 0; j < dim; j++) {
+                    interp_cfg[j] = nearest_node[j] + delta[wid][j] * (i + 1);
+                }
+                volatile unsigned int local_cc_result = 0;
+                if (tid == 0) printf("here5\n");
+                config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid, &local_cc_result);
+                if (tid == 0) printf("here6\n");
+                __syncwarp();
+                for (unsigned int offset = 16; offset > 0; offset /= 2) {
+                    if (tid == 0) printf("here7\n");
+                    bool other_config_in_collision = __shfl_down_sync(FULL_MASK, config_in_collision, offset);
+                    config_in_collision = config_in_collision || other_config_in_collision;
+                }
+                if (tid == 0) printf("config_in_collision: %d\n", config_in_collision);
+                config_in_collision = __shfl_sync(FULL_MASK, config_in_collision, 0);
+                if (config_in_collision) break;
             }
-
+            if (tid == 0) printf("here8\n");
             /* add new config to this tree */
             if (!config_in_collision) {
+                // printf("lid: %d\n", lid);
                 unsigned int index = free_index[wid][t_tree_id];
                 if (lid == 0) {
                     if (index >= d_settings.max_samples) {
@@ -391,15 +459,20 @@ namespace nRRTC {
                     free_index[wid][t_tree_id] = index + 1;
                     t_parents[index] = min_index;
                 }
+                if (tid == 0) printf("here9\n");
                 if (lid < dim) {
                     t_nodes[index * dim + lid] = config[wid][lid];
                 }
-
+                __syncwarp();
+                if (tid == 0) {
+                    printf("Added new config: ");
+                    print_config(&t_nodes[index * dim], dim);
+                }
                 /* connect (find nearest node in other tree and attempt connection) */
                 float min_dist = FLT_MAX;
                 int min_index = -1;
-                for (unsigned int i = lid; i < free_index[o_tree_id]; i += 32) {
-                    dist = device_utils::sq_l2_dist(&o_nodes[i * dim], &config[wid], dim);
+                for (unsigned int i = lid; i < free_index[wid][o_tree_id]; i += 32) {
+                    dist = device_utils::sq_l2_dist(&o_nodes[i * dim], config[wid], dim);
                     if (dist < min_dist) {
                         min_dist = dist;
                         min_index = i;
@@ -407,44 +480,61 @@ namespace nRRTC {
                 }
                 __syncwarp();
                 for (unsigned int offset = 16; offset > 0; offset /= 2) {
-                    min_dist = min(min_dist, __shfl_down_sync(FULL_MASK, min_dist, offset));
-                    min_index = (min_dist == __shfl_down_sync(FULL_MASK, min_dist, offset)) ? __shfl_down_sync(FULL_MASK, min_index, offset) : min_index;
+                    float other_dist = __shfl_down_sync(FULL_MASK, min_dist, offset);
+                    int other_index = __shfl_down_sync(FULL_MASK, min_index, offset);
+                    if (other_dist < min_dist) {
+                        min_dist = other_dist;
+                        min_index = other_index;
+                    }
                 }
-                __shfl_sync(FULL_MASK, min_dist, 0);
-                __shfl_sync(FULL_MASK, min_index, 0);
-                min_dist = sqrt(min_dist)
+                min_dist = __shfl_sync(FULL_MASK, min_dist, 0);
+                min_index = __shfl_sync(FULL_MASK, min_index, 0);
+                min_dist = sqrt(min_dist);
                 int n_extensions = ceil(min_dist / d_settings.range);
-
+                if (tid == 0) printf("here11\n");
                 if (lid < dim) {
                     delta[wid][lid] = (o_nodes[min_index * dim + lid] - config[wid][lid]) / (float) n_extensions;
                 }
                 __syncwarp();
-
+                if (tid == 0) {
+                    printf("n_extensions: %d\n", n_extensions);
+                    printf("delta: ");
+                    print_config(delta[wid], dim);
+                }
                 /* extend as far as we can to NN in opposite tree */
                 int i_extensions = 0;
                 int extension_parent_idx = index;
                 while (i_extensions < n_extensions) {
+                    if (tid == 0) printf("i_extensions: %d\n", i_extensions);
                     /* collision check the extension */
                     bool config_in_collision = false;
                     for (unsigned int i = lid; i < d_settings.granularity; i+=32) {
-                        if (i + lid < d_settings.granularity) {
-                            for (unsigned int j = 0; j < dim; j++) {
-                                interp_cfg[j] = config[j] + (delta[wid][j] * (i + lid));
-                            }
-                            config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid, local_cc_result);
-                            __syncwarp();
-                            for (unsigned int offset = 16; offset > 0; offset /= 2) {
-                                config_in_collision = config_in_collision || __shfl_down_sync(FULL_MASK, config_in_collision, offset);
-                            }
-                            __shfl_sync(FULL_MASK, config_in_collision, 0);
-                            if (config_in_collision) break;
+                        if (tid == 0) {
+                            printf("i: %d\n", i);
                         }
+                        // printf("lid: %d, wid: %d\n", lid, wid);
+                        for (unsigned int j = 0; j < dim; j++) {
+                            interp_cfg[j] = config[wid][j] + ((delta[wid][j] / d_settings.granularity) * (i + 1));
+                        }
+                        volatile unsigned int local_cc_result = 0;
+                        if (tid == 0) printf("here13\n");
+                        config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid, &local_cc_result);
+                        if (tid == 0) printf("here14\n");
                         __syncwarp();
+                        for (unsigned int offset = 16; offset > 0; offset /= 2) {
+                            if (tid == 0) printf("here15\n");
+                            bool other_config_in_collision = __shfl_down_sync(FULL_MASK, config_in_collision, offset);
+                            config_in_collision = config_in_collision || other_config_in_collision;
+                        }
+                        if (tid == 0) printf("config_in_collision (ext): %d\n", config_in_collision);
+                        config_in_collision = __shfl_sync(FULL_MASK, config_in_collision, 0);
+                        if (config_in_collision) break;
                     }
                     if (config_in_collision) break;
                     /* add extended config to tree */
+                    index = free_index[wid][t_tree_id];
                     if (lid == 0) {
-                        unsigned int index = free_index[wid][t_tree_id];
+                        printf("extending: %d\n", i_extensions);
                         if (index >= d_settings.max_samples) {
                             atomicCAS((int *)&solved, 0, -1);
                         }
@@ -454,14 +544,20 @@ namespace nRRTC {
                     }
                     if (lid < dim) {
                         config[wid][lid] = config[wid][lid] + delta[wid][lid];
-                        t_nodes[index * dim + lid] = interp_cfg[lid];
+                        t_nodes[index * dim + lid] = config[wid][lid];
+                    }
+                    __syncwarp();
+                    if (lid == 0) {
+                        printf("Added config: ");
+                        print_config(&t_nodes[index * dim], dim);
                     }
                     i_extensions ++;
-                    __syncwarp();
                 }
                 /* check if we reached the goal */
                 if (i_extensions == n_extensions) {
                     if (lid == 0 && atomicCAS((int *)&solved, 0, 1) == 0) {
+                        printf("ENTERED SOLUTION CODE\n");
+                        printf("tree_idx: %d\n", tree_idx);
                         // trace back to the start and goal.
                         int current = index;
                         int parent;
@@ -485,9 +581,12 @@ namespace nRRTC {
                             current = parent;
                         }
                         if (t_tree_id == 0) reached_goal_idx = current;
+                        printf("t_path_size: %d, o_path_size: %d\n", t_path_size, o_path_size);
                         path_size[t_tree_id] = t_path_size;
                         path_size[o_tree_id] = o_path_size;
                         solved_iters = iter;
+                        solved_free_index[0] = free_index[wid][0];
+                        solved_free_index[1] = free_index[wid][1];
                     }
                     __syncwarp();
                 }
@@ -508,11 +607,11 @@ namespace nRRTC {
     ) 
     {
         // std::cout << "here" << std::endl;
+        settings.max_samples = MAX_TREE_SIZE * NUM_TREES;
         cudaSetDevice(1);
         // std::cout << "here1" << std::endl;
         auto start_time = std::chrono::steady_clock::now();
         static constexpr auto dim = Robot::dimension;
-        std::size_t iter = 0;
         std::size_t start_index = 0;
 
         
@@ -544,24 +643,27 @@ namespace nRRTC {
 
         // std::cout << "here3" << std::endl;
 
-        // add start to tree_a and goals to tree_b
-        cudaMemcpy(nodes[0], start.data(), config_size, cudaMemcpyHostToDevice);
-        cudaMemcpy(parents[0], &start_index, sizeof(int), cudaMemcpyHostToDevice);
+        // add start and goal configurations to trees
+        for (int i = 0; i < NUM_TREES; i++) {
+            int global_idx = i * MAX_TREE_SIZE;
+            cudaMemcpy(nodes[0] + (global_idx * dim), start.data(), config_size, cudaMemcpyHostToDevice);
+            cudaMemcpy(parents[0] + global_idx, &start_index, sizeof(int), cudaMemcpyHostToDevice);
 
-        cudaMemcpy(nodes[1], goals.data(), config_size * num_goals, cudaMemcpyHostToDevice);
-        std::vector<int> parents_b_init(num_goals);
-        iota(parents_b_init.begin(), parents_b_init.end(), 0); // consecutive integers from 0 ... num_goals - 1
-        cudaMemcpy(parents[1], parents_b_init.data(), sizeof(int) * num_goals, cudaMemcpyHostToDevice);
+            cudaMemcpy(nodes[1] + (global_idx * dim), goals.data(), config_size * num_goals, cudaMemcpyHostToDevice);
+            std::vector<int> parents_b_init(num_goals);
+            iota(parents_b_init.begin(), parents_b_init.end(), 0); // consecutive integers from 0 ... num_goals - 1
+            cudaMemcpy(parents[1] + global_idx, parents_b_init.data(), sizeof(int) * num_goals, cudaMemcpyHostToDevice);
 
-        // initialize radii
-        std::vector<float> radii_init(num_goals, FLT_MAX);
-        cudaMemcpy(radii[0], radii_init.data(), sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy(radii[1], radii_init.data(), sizeof(float) * num_goals, cudaMemcpyHostToDevice);
-        // std::cout << "here4" << std::endl;
+            std::vector<float> radii_init(num_goals, FLT_MAX);
+            cudaMemcpy(radii[0] + global_idx, radii_init.data(), sizeof(float), cudaMemcpyHostToDevice);
+            cudaMemcpy(radii[1] + global_idx, radii_init.data(), sizeof(float) * num_goals, cudaMemcpyHostToDevice);
+        }
+        cudaCheckError(cudaGetLastError());
+        
         // create a curandState for each thread -> holds state of RNG for each thread seperately
         // For growing the tree we will create NUM_NEW_CONFIGS threads
         curandState *rng_states;
-        int num_rng_states = settings.num_new_configs * dim;
+        int num_rng_states = NUM_TREES * 32;
         cudaMalloc(&rng_states, num_rng_states * sizeof(curandState));
         int numBlocks = (num_rng_states + BLOCK_SIZE - 1) / BLOCK_SIZE;
         init_rng<<<numBlocks, BLOCK_SIZE>>>(rng_states, 1, num_rng_states);
@@ -571,9 +673,7 @@ namespace nRRTC {
         int numBlocks1 = (settings.num_new_configs + BLOCK_SIZE - 1) / BLOCK_SIZE;
         init_halton<Robot><<<numBlocks1, BLOCK_SIZE>>>(halton_states, rng_states);
 
-        // free index for next available position in tree_a and tree_b
-        int h_free_index[2] = {1, num_goals};
-        cudaMemcpyToSymbol(atomic_free_index, &h_free_index, sizeof(int) * 2);
+        
         // std::cout << "here5" << std::endl;
         // allocate for obstacles
         ppln::collision::Environment<float> *env;
@@ -588,13 +688,14 @@ namespace nRRTC {
         *h_solved = -1;
         // std::cout << "here7" << std::endl;
         auto kernel_start_time = std::chrono::steady_clock::now();
-        rrtc<Robot><<<settings.num_new_configs, settings.granularity>>> (
+        rrtc<Robot><<<2, 32>>> (
             d_nodes,
             d_parents,
             d_radii,
             halton_states,
             rng_states,
-            env
+            env,
+            num_goals
         );
         cudaDeviceSynchronize();
         res.kernel_ns = get_elapsed_nanoseconds(kernel_start_time);
@@ -603,16 +704,15 @@ namespace nRRTC {
         // std::cout << "here8" << std::endl;
         
 
-        cudaMemcpyFromSymbol(current_samples, atomic_free_index, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
         cudaMemcpyFromSymbol(h_solved, solved, sizeof(int), 0, cudaMemcpyDeviceToHost);
         cudaMemcpyFromSymbol(&h_solved_iters, solved_iters, sizeof(int), 0, cudaMemcpyDeviceToHost);
-
+        cudaMemcpyFromSymbol(current_samples, solved_free_index, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
         // currently, iteration count is not copied because each block may have different iteration count
         if (*h_solved!=1) *h_solved=0;
         std::cout << "current_samples: start: " << current_samples[0] << ", goal: " << current_samples[1] << "\n";
         std::cout << "solved iters: " << h_solved_iters << "\n";
-        res.start_tree_size = current_samples[0];
-        res.goal_tree_size = current_samples[1];
+        // res.start_tree_size = current_samples[0];
+        // res.goal_tree_size = current_samples[1];
         Robot::print_robot_config(start);
         Robot::print_robot_config(goals[0]);
         if (*h_solved) {

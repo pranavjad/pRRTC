@@ -99,7 +99,7 @@ int main(int argc, char* argv[]) {
     // cage 13 - 14842 iterations for RRT w Halton on CPU
     // cage 100 - ~200,000 iterations for RRT w Halton on CPU
     // cage 70 - 342,092 iters on CPU
-    std::string name = "cage";
+    std::string name = "table_pick";
     int problem_idx = 1;
     if (argc == 3) {
         name = argv[1];
@@ -117,11 +117,11 @@ int main(int argc, char* argv[]) {
     struct pRRTC_settings settings;
     settings.num_new_configs = 64;
     settings.granularity = 128;
-    settings.range = 0.5;
-    settings.balance = 1;
-    settings.tree_ratio = 0.5;
+    settings.range = 1.0;
+    settings.balance = 2;
+    settings.tree_ratio = 1.0;
     settings.dynamic_domain = false;
-    auto result = pRRTC::solve<Robot>(start, goals, env, settings);
+    auto result = nRRTC::solve<Robot>(start, goals, env, settings);
     for (auto& cfg: result.path) {
         print_cfg<Robot>(cfg);
     }
