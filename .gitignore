@@ -10,3 +10,4 @@ test_output
 plots
 *.csv
 .python-version
+*.sh

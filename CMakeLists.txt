@@ -72,7 +72,8 @@ add_executable(single_mbm
     scripts/single_mbm.cpp
     # src/planning/pRRT.cu
     # src/planning/nRRT.cu
-    src/planning/nRRTC.cu
+    # src/planning/nRRTC.cu
+    src/planning/pRRTC.cu
 )
 
 target_include_directories(single_mbm
@@ -88,18 +89,18 @@ target_link_libraries(single_mbm
 )
 
 ### generate_data
-add_executable(generate_data
-    scripts/generate_data.cpp
-    src/planning/pRRTC.cu
-)
+# add_executable(generate_data
+#     scripts/generate_data.cpp
+#     src/planning/pRRTC.cu
+# )
 
-target_include_directories(generate_data
-    PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
+# target_include_directories(generate_data
+#     PRIVATE
+#     ${CMAKE_CURRENT_SOURCE_DIR}
+# )
 
-target_link_libraries(generate_data
-    PRIVATE
-    nlohmann_json::nlohmann_json
-    Eigen3::Eigen
-)
+# target_link_libraries(generate_data
+#     PRIVATE
+#     nlohmann_json::nlohmann_json
+#     Eigen3::Eigen
+# )

@@ -11,7 +11,6 @@ using json = nlohmann::json;
 
 using namespace ppln::collision;
 
-std::ifstream f("scripts/panda_problems.json");
 
 Environment<float> problem_dict_to_env(const json& problem, const std::string& name) {
     Environment<float> env{};
@@ -89,22 +88,42 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
     return env;
 }
 
+template <typename Robot>
+void run_planner(json &data, Environment<float> &env, struct pRRTC_settings &settings) {
+    using Configuration = typename Robot::Configuration;
+    Configuration start = data["start"];
+    std::vector<Configuration> goals = data["goals"];
+    auto result = pRRTC::solve<Robot>(start, goals, env, settings);
+    for (auto& cfg: result.path) {
+        print_cfg<Robot>(cfg);
+    }
+    if (not result.solved) {
+        std::cout << "failed!" << std::endl;
+    }
+    std::cout << "cost: " << result.cost << "\n";
+    std::cout << "time (us): " << result.kernel_ns/1000 << "\n";
+}
+
 int main(int argc, char* argv[]) {
-    json all_data = json::parse(f);
-    json problems = all_data["problems"];
-    using Robot = robots::Panda;
-    using Configuration = Robot::Configuration;
-    int failed = 0;
-    std::map<std::string, std::vector<PlannerResult<Robot>>> results;
     // cage 13 - 14842 iterations for RRT w Halton on CPU
     // cage 100 - ~200,000 iterations for RRT w Halton on CPU
     // cage 70 - 342,092 iters on CPU
-    std::string name = "table_pick";
+    std::string robot_name = "panda";
+    std::string name = "cage";
     int problem_idx = 1;
-    if (argc == 3) {
-        name = argv[1];
-        problem_idx = std::stoi(argv[2]);
+    if (argc == 4) {
+        robot_name = argv[1];
+        name = argv[2];
+        problem_idx = std::stoi(argv[3]);
     }
+    else {
+        std::cout << "Usage: ./single_mbm <robot_name> <problem_name> <problem_idx>\n";
+        return 1;
+    }
+    std::string path = "scripts/" + robot_name + "_problems.json";
+    std::ifstream f(path);
+    json all_data = json::parse(f);
+    json problems = all_data["problems"];
     auto pset = problems[name];
     json data = pset[problem_idx - 1];
     if (not data["valid"]) {
@@ -112,24 +131,16 @@ int main(int argc, char* argv[]) {
     }
     auto env = problem_dict_to_env(data, name);
     printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
-    Configuration start = data["start"];
-    std::vector<Configuration> goals = data["goals"];
     struct pRRTC_settings settings;
     settings.num_new_configs = 64;
     settings.granularity = 128;
-    settings.range = 1.0;
+    settings.range = 0.5;
     settings.balance = 2;
     settings.tree_ratio = 1.0;
     settings.dynamic_domain = false;
-    auto result = nRRTC::solve<Robot>(start, goals, env, settings);
-    for (auto& cfg: result.path) {
-        print_cfg<Robot>(cfg);
+    if (robot_name == "fetch") {
+        run_planner<robots::Fetch>(data, env, settings);
+    } else if (robot_name == "panda") {
+        run_planner<robots::Panda>(data, env, settings);
     }
-    if (not result.solved) {
-        failed ++;
-        std::cout << "failed " << name << std::endl;
-    }
-    std::cout << "cost: " << result.cost << "\n";
-    std::cout << "time (us): " << result.kernel_ns/1000 << "\n";
-    results[name].emplace_back(result);
 }

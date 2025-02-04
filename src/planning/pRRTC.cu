@@ -318,7 +318,7 @@ namespace pRRTC {
         __shared__ float scale;
         __shared__ volatile float *nearest_node;
         __shared__ volatile float delta[dim];
-        __shared__ float var_cache[MAX_GRANULARITY][10];
+        // __shared__ float var_cache[MAX_GRANULARITY][10];
         __shared__ volatile int index;
         __shared__ volatile float vec[dim];
         __shared__ unsigned int n_extensions;
@@ -426,7 +426,7 @@ namespace pRRTC {
             for (int i = 0; i < dim; i++) {
                 interp_cfg[i] = nearest_node[i] + ((tid + 1) * delta[i]);
             }
-            bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid, local_cc_result);
+            bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, tid);
             atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
             __syncthreads();
             if (local_cc_result[0] == 0 && sdata[0] > 0) {
@@ -507,7 +507,7 @@ namespace pRRTC {
                     for (int i = 0; i < dim; i++) {
                         interp_cfg[i] = config[i] + ((tid + 1) * (vec[i] / d_settings.granularity));
                     }
-                    bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, var_cache, tid, local_cc_result);
+                    bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, tid);
                     atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
                     __syncthreads();
                     if (local_cc_result[0] != 0) break;

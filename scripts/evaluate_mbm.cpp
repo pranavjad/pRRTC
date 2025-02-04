@@ -204,7 +204,7 @@ int main(int argc, char* argv[]) {
     // 2, 128, 0.5, 1, 0
     settings.num_new_configs = 512;
     settings.granularity = 128;
-    settings.range = 1.0;
+    settings.range = 0.25;
     settings.balance = 1;
     settings.tree_ratio = 0.5;
     settings.dynamic_domain = true;

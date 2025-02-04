@@ -89,6 +89,7 @@ namespace ppln::device_utils {
     __device__ __forceinline__ float l2_dist(float *config_a, float *config_b, const int dim) {
         float ans = 0;
         float diff;
+        #pragma unroll
         for (int i = 0; i < dim; i++) {
             diff = config_a[i] - config_b[i];
             ans += diff * diff;
@@ -99,6 +100,7 @@ namespace ppln::device_utils {
     __device__ __forceinline__ float sq_l2_dist(float *config_a, float *config_b, const int dim) {
         float ans = 0;
         float diff;
+        #pragma unroll
         for (int i = 0; i < dim; i++) {
             diff = config_a[i] - config_b[i];
             ans += diff * diff;
@@ -322,17 +324,17 @@ namespace ppln::collision {
     // returns false if the config does collide with an obstacle, returns true if the config does not collide
 
     template <typename Robot>
-    __device__ __forceinline__ bool fkcc(volatile float *config, ppln::collision::Environment<float> *env, float var_cache[256][10], int tid, volatile unsigned int * local_cc_result);
+    __device__ __forceinline__ bool fkcc(volatile float *config, ppln::collision::Environment<float> *env, int tid);
 
 
     template <>
-    __device__ __forceinline__ bool fkcc<ppln::robots::Sphere>(volatile float *config, ppln::collision::Environment<float> *env, float var_cache[256][10], int tid, volatile unsigned int * local_cc_result)
+    __device__ __forceinline__ bool fkcc<ppln::robots::Sphere>(volatile float *config, ppln::collision::Environment<float> *env, int tid)
     {
         return not sphere_environment_in_collision(env, config[0], config[1], config[2], ppln::robots::Sphere::radius);
     }
 
     template <>
-    __device__  __forceinline__ bool fkcc<ppln::robots::Panda>(volatile float *q, ppln::collision::Environment<float> *environment, float var_cache[256][10], int tid, volatile unsigned int * local_cc_result)
+    __device__  __forceinline__ bool fkcc<ppln::robots::Panda>(volatile float *q, ppln::collision::Environment<float> *environment, int tid)
     {
         // Ignore static frame collisions - needed for some evaluation problems
         // if (/*panda_link0*/ sphere_environment_in_collision(environment, 0.0, 0.0, 0.05, 0.08))
@@ -361,19 +363,20 @@ namespace ppln::collision {
         float MUL_1680 = MUL_1594 * 0.03;  // intermediate
         float MUL_1683 = SUB_1587 * 0.03;
         float NEGATE_1684 = -MUL_1683; // intermediate
-        var_cache[tid][0] = SUB_1641;
-        var_cache[tid][1] = NEGATE_1643;
-        var_cache[tid][2] = MUL_1656;
-        var_cache[tid][3] = NEGATE_1660;
-        var_cache[tid][4] = MUL_1680;
-        var_cache[tid][5] = NEGATE_1684;
-        if (/*panda_link1*/ sphere_environment_in_collision(environment, var_cache[tid][0], var_cache[tid][1], 0.248, 0.154))
+        // var_cache[tid][0] = SUB_1641;
+        // var_cache[tid][1] = NEGATE_1643;
+        // var_cache[tid][2] = MUL_1656;
+        // var_cache[tid][3] = NEGATE_1660;
+        // var_cache[tid][4] = MUL_1680;
+        // var_cache[tid][5] = NEGATE_1684;
+        // if (tid%32 == 0) printf("here fkcc: %d", tid);
+        if (/*panda_link1*/ sphere_environment_in_collision(environment, SUB_1641, NEGATE_1643, 0.248, 0.154))
         {
-            if (sphere_environment_in_collision(environment, var_cache[tid][2], var_cache[tid][3], 0.333, 0.06))
+            if (sphere_environment_in_collision(environment, MUL_1656, NEGATE_1660, 0.333, 0.06))
             {
                 return false;
             }
-            if (sphere_environment_in_collision(environment, var_cache[tid][4], var_cache[tid][5], 0.333, 0.06))
+            if (sphere_environment_in_collision(environment, MUL_1680, NEGATE_1684, 0.333, 0.06))
             {
                 return false;
             }
@@ -1043,125 +1046,125 @@ namespace ppln::collision {
             }
         }  // (331, 557)
         if (/*panda_link1 vs. panda_link5*/ sphere_sphere_self_collision(
-            var_cache[tid][0], var_cache[tid][1], 0.248, 0.154, ADD_2402, ADD_2403, ADD_2404, 0.176))
+            SUB_1641, NEGATE_1643, 0.248, 0.154, ADD_2402, ADD_2403, ADD_2404, 0.176))
         {
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_2423, ADD_2424, ADD_2425, 0.06))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_2423, ADD_2424, ADD_2425, 0.06))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_2444, ADD_2445, ADD_2446, 0.06))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_2444, ADD_2445, ADD_2446, 0.06))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, SUB_2471, SUB_2472, SUB_2473, 0.06))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, SUB_2471, SUB_2472, SUB_2473, 0.06))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_2501, ADD_2502, ADD_2503, 0.05))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_2501, ADD_2502, ADD_2503, 0.05))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_2534, ADD_2535, ADD_2536, 0.025))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_2534, ADD_2535, ADD_2536, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_2567, ADD_2568, ADD_2569, 0.025))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_2567, ADD_2568, ADD_2569, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_2600, ADD_2601, ADD_2602, 0.025))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_2600, ADD_2601, ADD_2602, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_2633, ADD_2634, ADD_2635, 0.025))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_2633, ADD_2634, ADD_2635, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_2672, ADD_2673, ADD_2674, 0.025))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_2672, ADD_2673, ADD_2674, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_2711, ADD_2712, ADD_2713, 0.025))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_2711, ADD_2712, ADD_2713, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_2750, ADD_2751, ADD_2752, 0.025))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_2750, ADD_2751, ADD_2752, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_2789, ADD_2790, ADD_2791, 0.025))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_2789, ADD_2790, ADD_2791, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_2423, ADD_2424, ADD_2425, 0.06))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_2423, ADD_2424, ADD_2425, 0.06))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_2444, ADD_2445, ADD_2446, 0.06))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_2444, ADD_2445, ADD_2446, 0.06))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, SUB_2471, SUB_2472, SUB_2473, 0.06))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, SUB_2471, SUB_2472, SUB_2473, 0.06))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_2501, ADD_2502, ADD_2503, 0.05))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_2501, ADD_2502, ADD_2503, 0.05))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_2534, ADD_2535, ADD_2536, 0.025))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_2534, ADD_2535, ADD_2536, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_2567, ADD_2568, ADD_2569, 0.025))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_2567, ADD_2568, ADD_2569, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_2600, ADD_2601, ADD_2602, 0.025))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_2600, ADD_2601, ADD_2602, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_2633, ADD_2634, ADD_2635, 0.025))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_2633, ADD_2634, ADD_2635, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_2672, ADD_2673, ADD_2674, 0.025))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_2672, ADD_2673, ADD_2674, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_2711, ADD_2712, ADD_2713, 0.025))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_2711, ADD_2712, ADD_2713, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_2750, ADD_2751, ADD_2752, 0.025))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_2750, ADD_2751, ADD_2752, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_2789, ADD_2790, ADD_2791, 0.025))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_2789, ADD_2790, ADD_2791, 0.025))
             {
                 return false;
             }
@@ -1681,35 +1684,35 @@ namespace ppln::collision {
             }
         }  // (557, 637)
         if (/*panda_link1 vs. panda_link6*/ sphere_sphere_self_collision(
-            var_cache[tid][0], var_cache[tid][1], 0.248, 0.154, ADD_2887, ADD_2888, ADD_2889, 0.095))
+            SUB_1641, NEGATE_1643, 0.248, 0.154, ADD_2887, ADD_2888, ADD_2889, 0.095))
         {
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_564, ADD_565, ADD_566, 0.05))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_564, ADD_565, ADD_566, 0.05))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_2935, ADD_2936, ADD_2937, 0.05))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_2935, ADD_2936, ADD_2937, 0.05))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_2959, ADD_2960, ADD_2961, 0.052))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_2959, ADD_2960, ADD_2961, 0.052))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_564, ADD_565, ADD_566, 0.05))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_564, ADD_565, ADD_566, 0.05))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_2935, ADD_2936, ADD_2937, 0.05))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_2935, ADD_2936, ADD_2937, 0.05))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_2959, ADD_2960, ADD_2961, 0.052))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_2959, ADD_2960, ADD_2961, 0.052))
             {
                 return false;
             }
@@ -1945,55 +1948,55 @@ namespace ppln::collision {
             }
         }  // (637, 793)
         if (/*panda_link1 vs. panda_link7*/ sphere_sphere_self_collision(
-            var_cache[tid][0], var_cache[tid][1], 0.248, 0.154, ADD_3042, ADD_3043, ADD_3044, 0.072))
+            SUB_1641, NEGATE_1643, 0.248, 0.154, ADD_3042, ADD_3043, ADD_3044, 0.072))
         {
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3063, ADD_3064, ADD_3065, 0.05))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3063, ADD_3064, ADD_3065, 0.05))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3090, ADD_3091, ADD_3092, 0.025))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3090, ADD_3091, ADD_3092, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3117, ADD_3118, ADD_3119, 0.025))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3117, ADD_3118, ADD_3119, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3144, ADD_3145, ADD_3146, 0.02))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3144, ADD_3145, ADD_3146, 0.02))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3171, ADD_3172, ADD_3173, 0.02))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3171, ADD_3172, ADD_3173, 0.02))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3063, ADD_3064, ADD_3065, 0.05))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3063, ADD_3064, ADD_3065, 0.05))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3090, ADD_3091, ADD_3092, 0.025))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3090, ADD_3091, ADD_3092, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3117, ADD_3118, ADD_3119, 0.025))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3117, ADD_3118, ADD_3119, 0.025))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3144, ADD_3145, ADD_3146, 0.02))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3144, ADD_3145, ADD_3146, 0.02))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3171, ADD_3172, ADD_3173, 0.02))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3171, ADD_3172, ADD_3173, 0.02))
             {
                 return false;
             }
@@ -2457,7 +2460,7 @@ namespace ppln::collision {
             }
         }  // (793, 793)
 
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
 
         if (/*panda_link7*/ sphere_environment_in_collision(environment, ADD_3042, ADD_3043, ADD_3044, 0.072))
         {
@@ -2839,185 +2842,185 @@ namespace ppln::collision {
             }
         }  // (978, 978)
         if (/*panda_link1 vs. panda_hand*/ sphere_sphere_self_collision(
-            var_cache[tid][0], var_cache[tid][1], 0.248, 0.154, ADD_3300, ADD_3301, ADD_3302, 0.104))
+            SUB_1641, NEGATE_1643, 0.248, 0.154, ADD_3300, ADD_3301, ADD_3302, 0.104))
         {
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3330, ADD_3331, ADD_3332, 0.028))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3330, ADD_3331, ADD_3332, 0.028))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3360, ADD_3361, ADD_3362, 0.028))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3360, ADD_3361, ADD_3362, 0.028))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3390, ADD_3391, ADD_3392, 0.028))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3390, ADD_3391, ADD_3392, 0.028))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3414, ADD_3415, ADD_3416, 0.028))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3414, ADD_3415, ADD_3416, 0.028))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3438, ADD_3439, ADD_3440, 0.028))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3438, ADD_3439, ADD_3440, 0.028))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3462, ADD_3463, ADD_3464, 0.028))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3462, ADD_3463, ADD_3464, 0.028))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3492, ADD_3493, ADD_3494, 0.026))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3492, ADD_3493, ADD_3494, 0.026))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3522, ADD_3523, ADD_3524, 0.026))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3522, ADD_3523, ADD_3524, 0.026))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3552, ADD_3553, ADD_3554, 0.026))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3552, ADD_3553, ADD_3554, 0.026))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3576, ADD_3577, ADD_3578, 0.026))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3576, ADD_3577, ADD_3578, 0.026))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3600, ADD_3601, ADD_3602, 0.026))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3600, ADD_3601, ADD_3602, 0.026))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3624, ADD_3625, ADD_3626, 0.026))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3624, ADD_3625, ADD_3626, 0.026))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3654, ADD_3655, ADD_3656, 0.024))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3654, ADD_3655, ADD_3656, 0.024))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3684, ADD_3685, ADD_3686, 0.024))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3684, ADD_3685, ADD_3686, 0.024))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3714, ADD_3715, ADD_3716, 0.024))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3714, ADD_3715, ADD_3716, 0.024))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3738, ADD_3739, ADD_3740, 0.024))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3738, ADD_3739, ADD_3740, 0.024))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3762, ADD_3763, ADD_3764, 0.024))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3762, ADD_3763, ADD_3764, 0.024))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3786, ADD_3787, ADD_3788, 0.024))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3786, ADD_3787, ADD_3788, 0.024))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3330, ADD_3331, ADD_3332, 0.028))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3330, ADD_3331, ADD_3332, 0.028))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3360, ADD_3361, ADD_3362, 0.028))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3360, ADD_3361, ADD_3362, 0.028))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3390, ADD_3391, ADD_3392, 0.028))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3390, ADD_3391, ADD_3392, 0.028))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3414, ADD_3415, ADD_3416, 0.028))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3414, ADD_3415, ADD_3416, 0.028))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3438, ADD_3439, ADD_3440, 0.028))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3438, ADD_3439, ADD_3440, 0.028))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3462, ADD_3463, ADD_3464, 0.028))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3462, ADD_3463, ADD_3464, 0.028))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3492, ADD_3493, ADD_3494, 0.026))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3492, ADD_3493, ADD_3494, 0.026))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3522, ADD_3523, ADD_3524, 0.026))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3522, ADD_3523, ADD_3524, 0.026))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3552, ADD_3553, ADD_3554, 0.026))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3552, ADD_3553, ADD_3554, 0.026))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3576, ADD_3577, ADD_3578, 0.026))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3576, ADD_3577, ADD_3578, 0.026))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3600, ADD_3601, ADD_3602, 0.026))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3600, ADD_3601, ADD_3602, 0.026))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3624, ADD_3625, ADD_3626, 0.026))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3624, ADD_3625, ADD_3626, 0.026))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3654, ADD_3655, ADD_3656, 0.024))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3654, ADD_3655, ADD_3656, 0.024))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3684, ADD_3685, ADD_3686, 0.024))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3684, ADD_3685, ADD_3686, 0.024))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3714, ADD_3715, ADD_3716, 0.024))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3714, ADD_3715, ADD_3716, 0.024))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3738, ADD_3739, ADD_3740, 0.024))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3738, ADD_3739, ADD_3740, 0.024))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3762, ADD_3763, ADD_3764, 0.024))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3762, ADD_3763, ADD_3764, 0.024))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3786, ADD_3787, ADD_3788, 0.024))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3786, ADD_3787, ADD_3788, 0.024))
             {
                 return false;
             }
@@ -3566,7 +3569,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (978, 978)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         if (/*panda_link5 vs. panda_hand*/ sphere_sphere_self_collision(
             ADD_2402, ADD_2403, ADD_2404, 0.176, ADD_3300, ADD_3301, ADD_3302, 0.104))
         {
@@ -4651,7 +4654,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (978, 978)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         float MUL_3864 = ADD_3269 * 2.0;
         float MUL_3851 = SUB_3256 * 2.0;
         float MUL_1196 = SUB_1063 * 0.065;
@@ -4751,25 +4754,25 @@ namespace ppln::collision {
             }
         }  // (1050, 1050)
         if (/*panda_link1 vs. panda_leftfinger*/ sphere_sphere_self_collision(
-            var_cache[tid][0], var_cache[tid][1], 0.248, 0.154, ADD_3896, ADD_3897, ADD_3898, 0.024))
+            SUB_1641, NEGATE_1643, 0.248, 0.154, ADD_3896, ADD_3897, ADD_3898, 0.024))
         {
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3920, ADD_3921, ADD_3922, 0.012))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3920, ADD_3921, ADD_3922, 0.012))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_3944, ADD_3945, ADD_3946, 0.012))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_3944, ADD_3945, ADD_3946, 0.012))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3920, ADD_3921, ADD_3922, 0.012))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3920, ADD_3921, ADD_3922, 0.012))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_3944, ADD_3945, ADD_3946, 0.012))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_3944, ADD_3945, ADD_3946, 0.012))
             {
                 return false;
             }
@@ -5039,25 +5042,25 @@ namespace ppln::collision {
             }
         }  // (1050, 1112)
         if (/*panda_link1 vs. panda_rightfinger*/ sphere_sphere_self_collision(
-            var_cache[tid][0], var_cache[tid][1], 0.248, 0.154, ADD_4028, ADD_4029, ADD_4030, 0.024))
+            SUB_1641, NEGATE_1643, 0.248, 0.154, ADD_4028, ADD_4029, ADD_4030, 0.024))
         {
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_4058, ADD_4059, ADD_4060, 0.012))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_4058, ADD_4059, ADD_4060, 0.012))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][2], var_cache[tid][3], 0.333, 0.06, ADD_4088, ADD_4089, ADD_4090, 0.012))
+                    MUL_1656, NEGATE_1660, 0.333, 0.06, ADD_4088, ADD_4089, ADD_4090, 0.012))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_4058, ADD_4059, ADD_4060, 0.012))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_4058, ADD_4059, ADD_4060, 0.012))
             {
                 return false;
             }
             if (sphere_sphere_self_collision(
-                    var_cache[tid][4], var_cache[tid][5], 0.333, 0.06, ADD_4088, ADD_4089, ADD_4090, 0.012))
+                    MUL_1680, NEGATE_1684, 0.333, 0.06, ADD_4088, ADD_4089, ADD_4090, 0.012))
             {
                 return false;
             }
@@ -5267,7 +5270,7 @@ namespace ppln::collision {
     }
 
     template <>
-    __device__  __forceinline__ bool fkcc<ppln::robots::Fetch>(volatile float *q, ppln::collision::Environment<float> *environment, float var_cache[256][10], int tid, volatile unsigned int * local_cc_result)
+    __device__  __forceinline__ bool fkcc<ppln::robots::Fetch>(volatile float *q, ppln::collision::Environment<float> *environment, int tid)
     {
         if (/*base_link*/ sphere_environment_in_collision(environment, -0.02, 0.0, 0.188, 0.34))
         {
@@ -7025,7 +7028,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (166, 308)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         if (/*shoulder_pan_link vs. upperarm_roll_link*/ sphere_sphere_self_collision(
             ADD_1770, SUB_1769, ADD_1771, 0.124, ADD_2251, ADD_2252, ADD_2253, 0.134))
         {
@@ -7721,7 +7724,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (308, 308)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         if (/*upperarm_roll_link*/ sphere_environment_in_collision(
             environment, ADD_2251, ADD_2252, ADD_2253, 0.134))
         {
@@ -8522,7 +8525,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (435, 435)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         if (/*head_pan_link vs. elbow_flex_link*/ sphere_sphere_self_collision(
             0.01325, 0.0, ADD_1497, 0.197, ADD_2575, ADD_2576, ADD_2577, 0.127))
         {
@@ -9585,7 +9588,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (435, 435)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         auto MUL_558 = ADD_481 * 0.197;
         auto MUL_563 = ADD_481 * MUL_558;
         auto MUL_553 = ADD_475 * 0.197;
@@ -10430,7 +10433,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (571, 571)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         if (/*forearm_roll_link*/ sphere_environment_in_collision(
             environment, ADD_2841, ADD_2842, ADD_2843, 0.124))
         {
@@ -11699,7 +11702,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (571, 571)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         auto MUL_694 = SUB_617 * 0.1245;
         auto MUL_699 = SUB_617 * MUL_694;
         auto MUL_689 = ADD_611 * 0.1245;
@@ -13491,7 +13494,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (692, 692)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         if (/*wrist_flex_link*/ sphere_environment_in_collision(
             environment, ADD_3163, ADD_3164, ADD_3165, 0.09))
         {
@@ -14007,7 +14010,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (751, 751)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         if (/*shoulder_pan_link vs. wrist_roll_link*/ sphere_sphere_self_collision(
             ADD_1770, SUB_1769, ADD_1771, 0.124, SUB_3423, SUB_3424, SUB_3425, 0.07))
         {
@@ -14685,7 +14688,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (822, 822)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         if (/*gripper_link*/ sphere_environment_in_collision(
             environment, SUB_3549, SUB_3550, SUB_3551, 0.075))
         {
@@ -15622,7 +15625,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (822, 822)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         if (/*torso_lift_link_collision_2 vs. gripper_link*/ sphere_sphere_self_collision(
             0.013125, 0.0, ADD_1490, 0.07, SUB_3549, SUB_3550, SUB_3551, 0.075))
         {
@@ -17005,7 +17008,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (912, 912)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         if (/*r_gripper_finger_link vs. torso_fixed_link*/ sphere_sphere_self_collision(
             SUB_3772, SUB_3773, SUB_3774, 0.03, -0.186875, 0.0, 0.587425, 0.277))
         {
@@ -17773,7 +17776,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (912, 912)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         auto SUB_1238 = MUL_1100 - MUL_1102;
         auto MUL_4047 = SUB_3499 * 2.0;
         auto MUL_4078 = MUL_4047 * 0.009;
@@ -19333,7 +19336,7 @@ namespace ppln::collision {
                 return false;
             }
         }  // (991, 991)
-        if (local_cc_result[0]>0) return false;
+        // if (local_cc_result[0]>0) return false;
         if (/*shoulder_lift_link vs. l_gripper_finger_link*/ sphere_sphere_self_collision(
             ADD_1952, ADD_1953, ADD_1954, 0.134, ADD_4089, ADD_4090, ADD_4091, 0.03))
         {
