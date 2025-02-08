@@ -28,6 +28,7 @@ endif()
 
 ### Uncomment this line to see ptx compiler info, number of registers used, etc.
 # set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas -v")
+# set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-g -G")  # enable cuda-gdb
 
 ### rrt test script
 # add_executable(test_rrt
@@ -88,6 +89,8 @@ target_link_libraries(single_mbm
     Eigen3::Eigen
 )
 
+
+
 ### generate_data
 # add_executable(generate_data
 #     scripts/generate_data.cpp
@@ -104,3 +107,20 @@ target_link_libraries(single_mbm
 #     nlohmann_json::nlohmann_json
 #     Eigen3::Eigen
 # )
+
+### check_edge script
+add_executable(edge_check
+    scripts/edge_check.cu
+)
+
+target_include_directories(edge_check
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(edge_check
+    PRIVATE
+    # template_lib
+    nlohmann_json::nlohmann_json
+    Eigen3::Eigen
+)

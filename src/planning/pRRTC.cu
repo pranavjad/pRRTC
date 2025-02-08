@@ -23,13 +23,14 @@ namespace pRRTC {
     using namespace ppln;
     __device__ volatile int solved = 0;
     __device__ volatile int atomic_free_index[2]; // separate for tree_a and tree_b
+    __device__ volatile int nodes_size[2];
     __device__ float path[2][500]; // solution path segments for tree_a, and tree_b
     __device__ int path_size[2] = {0, 0};
     __device__ float cost = 0.0;
     __device__ int reached_goal_idx = 0;
     __device__ int solved_iters = 0; // value of iters in the block that solves the problem
     __constant__ pRRTC_settings d_settings;
-
+    __device__ int print_id = 0;
     // constexpr int MAX_SAMPLES = 1000000;
     // constexpr int MAX_ITERS = 1000000;
     // constexpr int NUM_NEW_CONFIGS = 600;
@@ -46,10 +47,10 @@ namespace pRRTC {
     constexpr int BLOCK_SIZE = 64;
 
     // Constants
-    __constant__ float primes[16] = {
-        3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f, 23.f,
-        29.f, 31.f, 37.f, 41.f, 43.f, 47.f, 53.f, 59.f
-    };
+    // __constant__ float primes[16] = {
+    //     3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f, 23.f,
+    //     29.f, 31.f, 37.f, 41.f, 43.f, 47.f, 53.f, 59.f
+    // };
 
     template<typename Robot>
     struct HaltonState {
@@ -58,8 +59,24 @@ namespace pRRTC {
         float d[Robot::dimension];   // denominators
     };
 
+    void __device__ shuffle_array(float *array, int n, curandState &state) {
+        for (int i = n - 1; i > 0; i--) {
+            int j = curand(&state) % (i + 1);
+            float temp = array[i];
+            array[i] = array[j];
+            array[j] = temp;
+        }
+    }
+
     template<typename Robot>
-    __device__ void halton_initialize(HaltonState<Robot>& state, size_t skip_iterations) {
+    __device__ void halton_initialize(HaltonState<Robot>& state, size_t skip_iterations, curandState& rng_state, int idx) {
+        
+        float primes[16] = {
+            3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f, 23.f,
+            29.f, 31.f, 37.f, 41.f, 43.f, 47.f, 53.f, 59.f
+        };
+        if (idx != 0) shuffle_array(primes, 16, rng_state);
+        
         // Initialize bases from primes
         for (size_t i = 0; i < Robot::dimension; i++) {
             state.b[i] = primes[i];
@@ -110,13 +127,13 @@ namespace pRRTC {
     __global__ void init_halton(HaltonState<Robot>* states, curandState* cr_states) {
         int idx = blockIdx.x * blockDim.x + threadIdx.x;
         if (idx >= d_settings.num_new_configs) return;
-        int skip = (curand_uniform(&cr_states[idx]) * 50000.0f);
+        // int skip = (curand_uniform(&cr_states[idx]) * 50000.0f);
+        int skip = 0;
         if (idx == 0) skip = 0;
-        if (idx == 1) skip = 100000;
-        halton_initialize(states[idx], skip);
+        halton_initialize(states[idx], skip, cr_states[idx], idx);
     }
 
-    __device__ inline void print_config(float *config, int dim) {
+    __device__ inline void print_config(volatile float *config, int dim) {
         for (int i = 0; i < dim; i++) {
             printf("%f ,", config[i]);
         }
@@ -265,6 +282,8 @@ namespace pRRTC {
         
         atomic_free_index[0] = 0;
         atomic_free_index[1] = 0;
+        nodes_size[0] = 0;
+        nodes_size[1] = 0;
         
         path_size[0] = 0;
         path_size[1] = 0;
@@ -287,6 +306,21 @@ namespace pRRTC {
             printf("CUDA error: %s\n", cudaGetErrorString(error));
         }
     }
+
+    __device__ __forceinline__ bool blockAnyTrue(bool localValue, int tid, int warpId, int laneId) {
+        __shared__ bool shared[16];
+        bool warpResult = __any_sync(0xffffffff, localValue);
+        if (laneId == 0) shared[warpId] = warpResult;
+        __syncthreads();
+        if (warpId == 0) {
+            bool blockResult = false;
+            if (laneId < (blockDim.x + warpSize - 1) / warpSize) blockResult = shared[laneId];
+            blockResult = __any_sync(0xffffffff, blockResult);
+            if (laneId == 0) shared[0] = blockResult;
+        }
+        __syncthreads();
+        return shared[0];
+    }
     
     template <typename Robot>
     __global__ void
@@ -305,6 +339,8 @@ namespace pRRTC {
         static constexpr auto dim = Robot::dimension;
         const int tid = threadIdx.x;
         const int bid = blockIdx.x; // 0 ... NUM_NEW_CONFIGS
+        const int lid = threadIdx.x%32;
+        const int wid = threadIdx.x/32;
         __shared__ int t_tree_id; // this tree
         __shared__ int o_tree_id; // the other tree
         __shared__ volatile float config[dim];
@@ -316,8 +352,8 @@ namespace pRRTC {
         __shared__ int *t_parents;
         __shared__ int *o_parents;
         __shared__ float scale;
-        __shared__ volatile float *nearest_node;
-        __shared__ volatile float delta[dim];
+        __shared__ float *nearest_node;
+        __shared__ float delta[dim];
         // __shared__ float var_cache[MAX_GRANULARITY][10];
         __shared__ volatile int index;
         __shared__ volatile float vec[dim];
@@ -328,10 +364,15 @@ namespace pRRTC {
 
         while (true) {
             // if (solved != 0) return;
+            // if (tid < dim) {
+            //     config[tid] = curand_uniform(&rng_states[bid * dim + tid]);
+            // }
+            // __syncthreads();
             if (tid == 0) {
                 // printf("iter: %d, bid: %d\n", iter, bid);
                 iter++;
                 if (iter > d_settings.max_iters) {
+                    // printf("max iters reached from bid: %d\n", bid);
                     atomicCAS((int *)&solved, 0, -1);
                 }
 
@@ -370,13 +411,17 @@ namespace pRRTC {
                 local_cc_result[0] = 0;
             }
             __syncthreads();
-            if (solved != 0) return;
+            if (solved != 0) {
+                // if (tid == 0) printf("Exiting because solved = %d\n, bid: %d, iter: %d", solved, bid, iter);
+                return;
+            }
 
             // divide up the work of finding nearest neighbor among the threads
             float local_min_dist = INFINITY;
             unsigned int local_near_idx = 0;
             float dist;
-            for (unsigned int i = tid; i < atomic_free_index[t_tree_id]; i += blockDim.x) {
+            int cur_free_index = atomicAdd((int *)&atomic_free_index[t_tree_id], 0);
+            for (int i = tid; i < cur_free_index; i += blockDim.x) {
                 dist = device_utils::sq_l2_dist(&t_nodes[i * dim], (float *) config, dim);
                 if (dist < local_min_dist) {
                     local_min_dist = dist;
@@ -399,16 +444,26 @@ namespace pRRTC {
 
             // by this point NN dist = sdata[0], NN index = sindex[0]
             // now calculate the extension
+            float nearest_node_copy[dim];
             if (tid == 0) {
                 sdata[0] = sqrt(sdata[0]);
                 scale = min(1.0f, d_settings.range / (sdata[0]));
                 nearest_node = &t_nodes[sindex[0] * dim];
+                for (int i = 0; i < dim; i++) {
+                    nearest_node_copy[i] = nearest_node[i];
+                }
+                printf("nearest node copy: %f %f %f %f %f %f %f %f\n sindex[0]: %d, t_tree_id: %d\n",
+                    nearest_node_copy[0], nearest_node_copy[1], nearest_node_copy[2], nearest_node_copy[3], nearest_node_copy[4], nearest_node_copy[5], nearest_node_copy[6], nearest_node_copy[7]
+                    , sindex[0], t_tree_id
+                );
                 should_skip = (d_settings.dynamic_domain && radii[t_tree_id][sindex[0]] < sdata[0]);
+                // printf("radius: %f, dist: %f\n, should_skip: %d", radii[t_tree_id][sindex[0]], sdata[0], should_skip);
                 // printf("calculate extension\n");
             }
             __syncthreads();
 
             if (should_skip) {
+                // if (tid == 0) printf("skipping iter %d\n", iter);
                 continue;
             }
             __syncthreads();
@@ -426,12 +481,68 @@ namespace pRRTC {
             for (int i = 0; i < dim; i++) {
                 interp_cfg[i] = nearest_node[i] + ((tid + 1) * delta[i]);
             }
+            __shared__ bool each_thread_result[128];
             bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, tid);
-            atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
+            each_thread_result[tid] = config_in_collision;
             __syncthreads();
-            if (local_cc_result[0] == 0 && sdata[0] > 0) {
+            bool edge_good = not blockAnyTrue(config_in_collision, tid, wid, lid);
+            // atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
+            __syncthreads();
+            if (tid == 0) {
+                // check edge with loop to verify
+                // printf("env debug: num_spheres: %d, num_capsules: %d, num_cylinders: %d, num_cuboids: %d\n", env->num_spheres, env->num_capsules, env->num_cylinders, env->num_cuboids);
+                bool debug_collision = false;
+                float debug_delta[dim];
+                float debug_interp_cfg[dim];
+                for (int i = 0; i < dim; i++) {
+                    debug_delta[i] = (config[i] - nearest_node[i]) / (float) d_settings.granularity;
+                }
+                for (int i = 0; i < d_settings.granularity; i++) {
+                    for (int j = 0; j < dim; j++) {
+                        debug_interp_cfg[j] = nearest_node[j] + ((i + 1) * debug_delta[j]);
+                    }
+                    config_in_collision = not ppln::collision::fkcc<Robot>(debug_interp_cfg, env, tid);
+                    if (config_in_collision) {
+                        debug_collision = true;
+                        break;
+                    }
+                }
+
+                bool debug_collision_2 = false;
+                for (int i = 0; i < 128; i++) {
+                    if (each_thread_result[i]) {
+                        debug_collision_2 = true;
+                        break;
+                    }
+                }
+
+                int l_print_id = atomicAdd(&print_id, 1);
+                printf("%d checked edge between: %f %f %f %f %f %f %f %f\n and %f %f %f %f %f %f %f %f. Result: %d, Debug1: %d, Debug2: %d, sindex[0]: %d\n, Nearest Node copy: %f %f %f %f %f %f %f %f\n", 
+                    l_print_id,
+                    nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6], nearest_node[7],
+                    config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7], edge_good, !debug_collision, !debug_collision_2, sindex[0],
+                    nearest_node_copy[0], nearest_node_copy[1], nearest_node_copy[2], nearest_node_copy[3], nearest_node_copy[4], nearest_node_copy[5], nearest_node_copy[6], nearest_node_copy[7]
+                );
+                
+                // printf("%d Debug delta: %f %f %f %f %f %f %f %f\n %f %f %f %f %f %f %f %f\n",
+                // l_print_id,
+                // delta[0], delta[1], delta[2], delta[3], delta[4], delta[5], delta[6], delta[7],
+                // debug_delta[0], debug_delta[1], debug_delta[2], debug_delta[3], debug_delta[4], debug_delta[5], debug_delta[6], debug_delta[7]
+                // );
+                // printf("%d Each thread Result:\n%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n",
+                // l_print_id,
+                // each_thread_result[0], each_thread_result[1], each_thread_result[2], each_thread_result[3], each_thread_result[4], each_thread_result[5], each_thread_result[6], each_thread_result[7], each_thread_result[8], each_thread_result[9], each_thread_result[10], each_thread_result[11], each_thread_result[12], each_thread_result[13], each_thread_result[14], each_thread_result[15], each_thread_result[16], each_thread_result[17], each_thread_result[18], each_thread_result[19], each_thread_result[20], each_thread_result[21], each_thread_result[22], each_thread_result[23], each_thread_result[24], each_thread_result[25], each_thread_result[26], each_thread_result[27], each_thread_result[28], each_thread_result[29], each_thread_result[30], each_thread_result[31], 
+                // each_thread_result[32], each_thread_result[33], each_thread_result[34], each_thread_result[35], each_thread_result[36], each_thread_result[37], each_thread_result[38], each_thread_result[39], each_thread_result[40], each_thread_result[41], each_thread_result[42], each_thread_result[43], each_thread_result[44], each_thread_result[45], each_thread_result[46], each_thread_result[47], each_thread_result[48], each_thread_result[49], each_thread_result[50], each_thread_result[51], each_thread_result[52], each_thread_result[53], each_thread_result[54], each_thread_result[55], each_thread_result[56], each_thread_result[57], each_thread_result[58], each_thread_result[59], each_thread_result[60], each_thread_result[61], each_thread_result[62], each_thread_result[63],
+                // each_thread_result[64], each_thread_result[65], each_thread_result[66], each_thread_result[67], each_thread_result[68], each_thread_result[69], each_thread_result[70], each_thread_result[71], each_thread_result[72], each_thread_result[73], each_thread_result[74], each_thread_result[75], each_thread_result[76], each_thread_result[77], each_thread_result[78], each_thread_result[79], each_thread_result[80], each_thread_result[81], each_thread_result[82], each_thread_result[83], each_thread_result[84], each_thread_result[85], each_thread_result[86], each_thread_result[87], each_thread_result[88], each_thread_result[89], each_thread_result[90], each_thread_result[91], each_thread_result[92], each_thread_result[93], each_thread_result[94], each_thread_result[95],
+                // each_thread_result[96], each_thread_result[97], each_thread_result[98], each_thread_result[99], each_thread_result[100], each_thread_result[101], each_thread_result[102], each_thread_result[103], each_thread_result[104], each_thread_result[105], each_thread_result[106], each_thread_result[107], each_thread_result[108], each_thread_result[109], each_thread_result[110], each_thread_result[111], each_thread_result[112], each_thread_result[113], each_thread_result[114], each_thread_result[115], each_thread_result[116], each_thread_result[117], each_thread_result[118], each_thread_result[119], each_thread_result[120], each_thread_result[121], each_thread_result[122], each_thread_result[123], each_thread_result[124], each_thread_result[125], each_thread_result[126], each_thread_result[127]
+                // );
+                
+            }
+            __syncthreads();
+            if (edge_good && sdata[0] > 0) {
                 /* grow tree */
                 if (tid == 0) {
+                    
                     index = atomicAdd((int *)&atomic_free_index[t_tree_id], 1);
                     if (index >= d_settings.max_samples) solved = -1;
                     
@@ -458,7 +569,13 @@ namespace pRRTC {
                     t_nodes[index * dim + tid] = config[tid];
                 }
                 __syncthreads();
-
+                if (tid == 0) {
+                    printf("added config to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n parent: %f %f %f %f %f %f %f %f\n", 
+                            t_tree_id, index, bid, sindex[0], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7],
+                            nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6], nearest_node[7]
+                        );
+                }
+                __syncthreads();
                 /* connect */
                 local_min_dist = INFINITY;
                 local_near_idx = 0;
@@ -505,12 +622,15 @@ namespace pRRTC {
                 while (i_extensions < n_extensions) {
                     /* each thread checking an interpolated config along the extension vector*/
                     for (int i = 0; i < dim; i++) {
-                        interp_cfg[i] = config[i] + ((tid + 1) * (vec[i] / d_settings.granularity));
+                        interp_cfg[i] = config[i] + ((tid + 1) * (vec[i] / (float) d_settings.granularity));
                     }
-                    bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, tid);
-                    atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
                     __syncthreads();
-                    if (local_cc_result[0] != 0) break;
+                    bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, tid);
+                    bool edge_good = not blockAnyTrue(config_in_collision, tid, wid, lid);
+                    // atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
+                    __syncthreads();
+                    if (!edge_good) break;
+                    // if (local_cc_result[0] != 0) break;
                     /* add extension to tree */
                     if (tid == 0) {
                         index = atomicAdd((int *)&atomic_free_index[t_tree_id], 1);
@@ -526,13 +646,21 @@ namespace pRRTC {
                         config[tid] = config[tid] + vec[tid];
                         t_nodes[index * dim + tid] = config[tid];
                     }
-                    
+                    __syncthreads();
+                    if (tid == 0) {
+                        printf("added config from extension to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n", t_tree_id, index, bid, t_parents[index], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7]);
+                        // print_config(config, dim);
+                    }
                     i_extensions++;
                     __syncthreads();
                 }
                 if (i_extensions == n_extensions) { // connected
                     if (tid == 0 && atomicCAS((int *)&solved, 0, 1) == 0) {
-                        // printf("in connected\n");
+                        printf("in connected\n");
+                        printf("config at connection: %f %f %f %f %f %f %f %f\n nearest node: %f %f %f %f %f %f %f %f\n", 
+                            config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7],
+                            nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6], nearest_node[7]
+                        );
                         // trace back to the start and goal.
                         int current = index;
                         int parent;
@@ -542,7 +670,7 @@ namespace pRRTC {
                             parent = t_parents[current];
                             cost += device_utils::l2_dist(&t_nodes[current * dim], &t_nodes[parent * dim], dim);
                             for (int i = 0; i < dim; i++) path[t_tree_id][t_path_size * dim + i] = t_nodes[current * dim + i];
-                            
+                            printf("added to path[%d]: %f %f %f %f %f %f %f %f\n", t_tree_id, path[t_tree_id][t_path_size * dim], path[t_tree_id][t_path_size * dim + 1], path[t_tree_id][t_path_size * dim + 2], path[t_tree_id][t_path_size * dim + 3], path[t_tree_id][t_path_size * dim + 4], path[t_tree_id][t_path_size * dim + 5], path[t_tree_id][t_path_size * dim + 6], path[t_tree_id][t_path_size * dim + 7]);
                             //print_config(&t_nodes[current * dim], dim);
                             t_path_size++;
                             current = parent;
@@ -551,11 +679,13 @@ namespace pRRTC {
                         //printf("GPU path above");
                         if (t_tree_id == 1) reached_goal_idx = current;
                         current = sindex[0];
+                        printf("sindex[0]: %d\n", sindex[0]);
                         // printf("entered here2\n");
                         while(o_parents[current] != current) {
                             parent = o_parents[current];
                             cost += device_utils::l2_dist(&o_nodes[current * dim], &o_nodes[parent * dim], dim);
                             for (int i = 0; i < dim; i++) path[o_tree_id][o_path_size * dim + i] = o_nodes[current * dim + i];
+                            printf("added to path[%d]: %f %f %f %f %f %f %f %f\n", o_tree_id, path[o_tree_id][o_path_size * dim], path[o_tree_id][o_path_size * dim + 1], path[o_tree_id][o_path_size * dim + 2], path[o_tree_id][o_path_size * dim + 3], path[o_tree_id][o_path_size * dim + 4], path[o_tree_id][o_path_size * dim + 5], path[o_tree_id][o_path_size * dim + 6], path[o_tree_id][o_path_size * dim + 7]);
                             //print_config(&o_nodes[current * dim], dim);
                             o_path_size++;
                             current = parent;
@@ -565,6 +695,8 @@ namespace pRRTC {
                         path_size[t_tree_id] = t_path_size;
                         path_size[o_tree_id] = o_path_size;
                         solved_iters = iter;
+                        
+                        printf("t_tree_id %d, t_path_size: %d, o_path_size: %d\n", t_tree_id, t_path_size, o_path_size);
                         // return;
                     }
                     __syncthreads();
@@ -608,7 +740,7 @@ namespace pRRTC {
         // std::cout << "here1" << std::endl;
         auto start_time = std::chrono::steady_clock::now();
         static constexpr auto dim = Robot::dimension;
-        std::size_t iter = 0;
+        // std::size_t iter = 0;
         std::size_t start_index = 0;
 
         

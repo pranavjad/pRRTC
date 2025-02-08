@@ -5270,7 +5270,7 @@ namespace ppln::collision {
     }
 
     template <>
-    __device__  __forceinline__ bool fkcc<ppln::robots::Fetch>(volatile float *q, ppln::collision::Environment<float> *environment, int tid)
+    __device__  __forceinline__ bool fkcc<ppln::robots::Fetch>(volatile float *q, ppln::collision::Environment<float> *environment, int tid) 
     {
         if (/*base_link*/ sphere_environment_in_collision(environment, -0.02, 0.0, 0.188, 0.34))
         {
@@ -5691,7 +5691,6 @@ namespace ppln::collision {
         auto ADD_2158 = MUL_178 + MUL_2141;
         auto MUL_2143 = MUL_1899 * 0.14;
         auto SUB_2159 = ADD_1838 - MUL_2143;
-        
         if (/*shoulder_lift_link*/ sphere_environment_in_collision(
             environment, ADD_1952, ADD_1953, ADD_1954, 0.134))
         {
@@ -7028,7 +7027,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (166, 308)
-        // if (local_cc_result[0]>0) return false;
         if (/*shoulder_pan_link vs. upperarm_roll_link*/ sphere_sphere_self_collision(
             ADD_1770, SUB_1769, ADD_1771, 0.124, ADD_2251, ADD_2252, ADD_2253, 0.134))
         {
@@ -7724,7 +7722,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (308, 308)
-        // if (local_cc_result[0]>0) return false;
         if (/*upperarm_roll_link*/ sphere_environment_in_collision(
             environment, ADD_2251, ADD_2252, ADD_2253, 0.134))
         {
@@ -7761,7 +7758,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (308, 308)
-        
         auto MUL_423 = SUB_345 * 0.133;
         auto MUL_428 = SUB_345 * MUL_423;
         auto MUL_418 = ADD_339 * 0.133;
@@ -8525,7 +8521,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (435, 435)
-        // if (local_cc_result[0]>0) return false;
         if (/*head_pan_link vs. elbow_flex_link*/ sphere_sphere_self_collision(
             0.01325, 0.0, ADD_1497, 0.197, ADD_2575, ADD_2576, ADD_2577, 0.127))
         {
@@ -9588,7 +9583,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (435, 435)
-        // if (local_cc_result[0]>0) return false;
         auto MUL_558 = ADD_481 * 0.197;
         auto MUL_563 = ADD_481 * MUL_558;
         auto MUL_553 = ADD_475 * 0.197;
@@ -10433,7 +10427,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (571, 571)
-        // if (local_cc_result[0]>0) return false;
         if (/*forearm_roll_link*/ sphere_environment_in_collision(
             environment, ADD_2841, ADD_2842, ADD_2843, 0.124))
         {
@@ -11702,7 +11695,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (571, 571)
-        // if (local_cc_result[0]>0) return false;
         auto MUL_694 = SUB_617 * 0.1245;
         auto MUL_699 = SUB_617 * MUL_694;
         auto MUL_689 = ADD_611 * 0.1245;
@@ -13494,7 +13486,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (692, 692)
-        // if (local_cc_result[0]>0) return false;
         if (/*wrist_flex_link*/ sphere_environment_in_collision(
             environment, ADD_3163, ADD_3164, ADD_3165, 0.09))
         {
@@ -14010,7 +14001,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (751, 751)
-        // if (local_cc_result[0]>0) return false;
         if (/*shoulder_pan_link vs. wrist_roll_link*/ sphere_sphere_self_collision(
             ADD_1770, SUB_1769, ADD_1771, 0.124, SUB_3423, SUB_3424, SUB_3425, 0.07))
         {
@@ -14688,7 +14678,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (822, 822)
-        // if (local_cc_result[0]>0) return false;
         if (/*gripper_link*/ sphere_environment_in_collision(
             environment, SUB_3549, SUB_3550, SUB_3551, 0.075))
         {
@@ -15625,7 +15614,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (822, 822)
-        // if (local_cc_result[0]>0) return false;
         if (/*torso_lift_link_collision_2 vs. gripper_link*/ sphere_sphere_self_collision(
             0.013125, 0.0, ADD_1490, 0.07, SUB_3549, SUB_3550, SUB_3551, 0.075))
         {
@@ -17008,7 +16996,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (912, 912)
-        // if (local_cc_result[0]>0) return false;
         if (/*r_gripper_finger_link vs. torso_fixed_link*/ sphere_sphere_self_collision(
             SUB_3772, SUB_3773, SUB_3774, 0.03, -0.186875, 0.0, 0.587425, 0.277))
         {
@@ -17776,7 +17763,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (912, 912)
-        // if (local_cc_result[0]>0) return false;
         auto SUB_1238 = MUL_1100 - MUL_1102;
         auto MUL_4047 = SUB_3499 * 2.0;
         auto MUL_4078 = MUL_4047 * 0.009;
@@ -19336,7 +19322,6 @@ namespace ppln::collision {
                 return false;
             }
         }  // (991, 991)
-        // if (local_cc_result[0]>0) return false;
         if (/*shoulder_lift_link vs. l_gripper_finger_link*/ sphere_sphere_self_collision(
             ADD_1952, ADD_1953, ADD_1954, 0.134, ADD_4089, ADD_4090, ADD_4091, 0.03))
         {
