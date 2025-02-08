@@ -380,20 +380,20 @@ namespace pRRTC {
                     t_tree_id = (bid < (d_settings.num_new_configs / 2))? 0 : 1;
                     o_tree_id = 1 - t_tree_id;
                 }
-                else if (d_settings.balance == 1 && abs(atomic_free_index[0]-atomic_free_index[1]) < 1.5 * d_settings.num_new_configs){
-                    float ratio = atomic_free_index[0] / (float)(atomic_free_index[0]+atomic_free_index[1]);
+                else if (d_settings.balance == 1 && abs(nodes_size[0]-nodes_size[1]) < 1.5 * d_settings.num_new_configs){
+                    float ratio = nodes_size[0] / (float)(nodes_size[0]+nodes_size[1]);
                     float balance_factor = 1 - ratio;
                     t_tree_id = (bid < (d_settings.num_new_configs * balance_factor))? 0 : 1;
                     o_tree_id = 1 - t_tree_id;
                 }
                 else if (d_settings.balance == 1) {
-                    float ratio = atomic_free_index[0] / (float)(atomic_free_index[0] + atomic_free_index[1]);
+                    float ratio = nodes_size[0] / (float)(nodes_size[0] + nodes_size[1]);
                     if (ratio < d_settings.tree_ratio) t_tree_id = 0;
                     else t_tree_id = 1;
                     o_tree_id = 1 - t_tree_id;
                 }
                 else if (d_settings.balance == 2) { // vamp balance algo
-                    float ratio = abs(atomic_free_index[t_tree_id] - atomic_free_index[o_tree_id]) / (float) atomic_free_index[t_tree_id];
+                    float ratio = abs(nodes_size[t_tree_id] - nodes_size[o_tree_id]) / (float) nodes_size[t_tree_id];
                     if (ratio < d_settings.tree_ratio)
                     {
                         t_tree_id = 1 - t_tree_id;
@@ -420,8 +420,8 @@ namespace pRRTC {
             float local_min_dist = INFINITY;
             unsigned int local_near_idx = 0;
             float dist;
-            int cur_free_index = atomicAdd((int *)&atomic_free_index[t_tree_id], 0);
-            for (int i = tid; i < cur_free_index; i += blockDim.x) {
+            int size = nodes_size[t_tree_id];
+            for (int i = tid; i < size; i += blockDim.x) {
                 dist = device_utils::sq_l2_dist(&t_nodes[i * dim], (float *) config, dim);
                 if (dist < local_min_dist) {
                     local_min_dist = dist;
@@ -570,6 +570,7 @@ namespace pRRTC {
                 }
                 __syncthreads();
                 if (tid == 0) {
+                    atomicAdd((int *)&nodes_size[t_tree_id], 1);
                     printf("added config to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n parent: %f %f %f %f %f %f %f %f\n", 
                             t_tree_id, index, bid, sindex[0], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7],
                             nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6], nearest_node[7]
@@ -579,7 +580,8 @@ namespace pRRTC {
                 /* connect */
                 local_min_dist = INFINITY;
                 local_near_idx = 0;
-                for (unsigned int i = tid; i < atomic_free_index[o_tree_id]; i += blockDim.x) {
+                int size = nodes_size[o_tree_id];
+                for (unsigned int i = tid; i < size; i += blockDim.x) {
                     dist = device_utils::sq_l2_dist(&o_nodes[i * dim], (float *)config, dim);
                     if (dist < local_min_dist) {
                         local_min_dist = dist;
@@ -648,6 +650,7 @@ namespace pRRTC {
                     }
                     __syncthreads();
                     if (tid == 0) {
+                        atomicAdd((int *)&nodes_size[t_tree_id], 1);
                         printf("added config from extension to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n", t_tree_id, index, bid, t_parents[index], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7]);
                         // print_config(config, dim);
                     }
@@ -802,6 +805,7 @@ namespace pRRTC {
         // free index for next available position in tree_a and tree_b
         int h_free_index[2] = {1, num_goals};
         cudaMemcpyToSymbol(atomic_free_index, &h_free_index, sizeof(int) * 2);
+        cudaMemcpyToSymbol(nodes_size, &h_free_index, sizeof(int) * 2);
         // std::cout << "here5" << std::endl;
         // allocate for obstacles
         ppln::collision::Environment<float> *env;
@@ -831,7 +835,7 @@ namespace pRRTC {
         // std::cout << "here8" << std::endl;
         
 
-        cudaMemcpyFromSymbol(current_samples, atomic_free_index, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
+        cudaMemcpyFromSymbol(current_samples, nodes_size, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
         cudaMemcpyFromSymbol(h_solved, solved, sizeof(int), 0, cudaMemcpyDeviceToHost);
         cudaMemcpyFromSymbol(&h_solved_iters, solved_iters, sizeof(int), 0, cudaMemcpyDeviceToHost);
 
