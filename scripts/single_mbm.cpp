@@ -7,9 +7,21 @@
 #include "src/planning/Planners.hh"
 #include "src/planning/pRRTC_settings.hh"
 
+#include <vamp/planning/validate.hh>
+#include <vamp/collision/factory.hh>
+#include <vamp/collision/environment.hh>
+#include <vamp/robots/fetch.hh> 
+#include <vamp/robots/panda.hh>
+// #include "/home/pranav/vamp/src/impl/vamp/collision/"
+
+
+
 using json = nlohmann::json;
 
 using namespace ppln::collision;
+
+// using vamp::collision = vamp::collision;
+static constexpr const std::size_t rake = vamp::FloatVectorWidth;
 
 
 Environment<float> problem_dict_to_env(const json& problem, const std::string& name) {
@@ -88,8 +100,67 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
     return env;
 }
 
-template <typename Robot>
-void run_planner(json &data, Environment<float> &env, struct pRRTC_settings &settings) {
+vamp::collision::Environment<vamp::FloatVector<rake>> problem_dict_vamp(const json& problem, const std::string &name) {
+    auto env = vamp::collision::Environment<float>();
+    
+    // Handle spheres
+    for (const auto& obj : problem["sphere"]) {
+        const json& position = obj["position"];
+        auto sphere = vamp::collision::factory::sphere::array(
+            {position[0], position[1], position[2]},
+            obj["radius"]
+        );
+        env.spheres.emplace_back(sphere);
+    }
+
+    // Handle cylinders
+    if (name == "box") {
+        for (const auto& obj : problem["cylinder"]) {
+            const json& position = obj["position"];
+            const json& orientation = obj["orientation_euler_xyz"];
+            const float radius = obj["radius"];
+            const std::array<float, 3> dims = {radius, radius, radius/2.0f};
+            auto cuboid = vamp::collision::factory::cuboid::array(
+                {position[0], position[1], position[2]},
+                {orientation[0], orientation[1], orientation[2]},
+                dims
+            );
+            env.cuboids.emplace_back(cuboid);
+        }
+    } else {
+        for (const auto& obj : problem["cylinder"]) {
+            const json& position = obj["position"];
+            const json& orientation = obj["orientation_euler_xyz"];
+            const float radius = obj["radius"];
+            const float length = obj["length"];
+            auto capsule = vamp::collision::factory::capsule::center::array(
+                {position[0], position[1], position[2]},
+                {orientation[0], orientation[1], orientation[2]},
+                radius, length
+            );
+            env.capsules.emplace_back(capsule);
+        }
+    }
+
+    // Handle boxes
+    for (const auto& obj : problem["box"]) {
+        const json& position = obj["position"];
+        const json& orientation = obj["orientation_euler_xyz"];
+        const json& half_extents = obj["half_extents"];
+        auto cuboid = vamp::collision::factory::cuboid::array(
+            {position[0], position[1], position[2]},
+            {orientation[0], orientation[1], orientation[2]},
+            {half_extents[0], half_extents[1], half_extents[2]}
+        );
+        env.cuboids.emplace_back(cuboid);
+    }
+    env.sort();
+    auto env_v = vamp::collision::Environment<vamp::FloatVector<rake>>(env);
+    return env_v;
+}
+
+template <typename Robot, typename vampRobot>
+void run_planner(json &data, Environment<float> &env, struct pRRTC_settings &settings, vamp::collision::Environment<vamp::FloatVector<rake>> &vamp_env) {
     using Configuration = typename Robot::Configuration;
     Configuration start = data["start"];
     std::vector<Configuration> goals = data["goals"];
@@ -102,6 +173,24 @@ void run_planner(json &data, Environment<float> &env, struct pRRTC_settings &set
     }
     std::cout << "cost: " << result.cost << "\n";
     std::cout << "time (us): " << result.kernel_ns/1000 << "\n";
+
+    // Validate the result
+    for (auto i = 1ul; i < result.path.size(); i++) {
+        auto cfg1 = result.path[i-1];
+        auto cfg2 = result.path[i];
+        std::cout << "config1: ";
+        print_cfg<Robot>(cfg1);
+        std::cout << "config2: ";
+        print_cfg<Robot>(cfg2);
+        typename vampRobot::Configuration vamp_cfg1(cfg1);
+        typename vampRobot::Configuration vamp_cfg2(cfg2);
+        if (not vamp::planning::validate_motion<vampRobot, rake, 1>(vamp_cfg1, vamp_cfg2, vamp_env)) {
+            int index1 = result.path.size() - i - 1;
+            int index2 = result.path.size() - (i-1) - 1;
+            std::cout << "Vamp found collision in solution path between " << index1 << " and " << index2 << std::endl;
+            break;
+        }
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -130,6 +219,7 @@ int main(int argc, char* argv[]) {
         return -1;
     }
     auto env = problem_dict_to_env(data, name);
+    auto vamp_env = problem_dict_vamp(data, name);
     printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
     struct pRRTC_settings settings;
     settings.num_new_configs = 600;
@@ -143,8 +233,8 @@ int main(int argc, char* argv[]) {
     settings.dd_min_radius = 1.0;
     settings.dd_alpha = 0.0001;
     if (robot_name == "fetch") {
-        run_planner<robots::Fetch>(data, env, settings);
+        run_planner<robots::Fetch, vamp::robots::Fetch>(data, env, settings, vamp_env);
     } else if (robot_name == "panda") {
-        run_planner<robots::Panda>(data, env, settings);
+        run_planner<robots::Panda, vamp::robots::Panda>(data, env, settings, vamp_env);
     }
 }

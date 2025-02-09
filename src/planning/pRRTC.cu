@@ -452,10 +452,10 @@ namespace pRRTC {
                 for (int i = 0; i < dim; i++) {
                     nearest_node_copy[i] = nearest_node[i];
                 }
-                printf("nearest node copy: %f %f %f %f %f %f %f %f\n sindex[0]: %d, t_tree_id: %d\n",
-                    nearest_node_copy[0], nearest_node_copy[1], nearest_node_copy[2], nearest_node_copy[3], nearest_node_copy[4], nearest_node_copy[5], nearest_node_copy[6], nearest_node_copy[7]
-                    , sindex[0], t_tree_id
-                );
+                // printf("nearest node copy: %f %f %f %f %f %f %f %f\n sindex[0]: %d, t_tree_id: %d\n",
+                //     nearest_node_copy[0], nearest_node_copy[1], nearest_node_copy[2], nearest_node_copy[3], nearest_node_copy[4], nearest_node_copy[5], nearest_node_copy[6], nearest_node_copy[7]
+                //     , sindex[0], t_tree_id
+                // );
                 should_skip = (d_settings.dynamic_domain && radii[t_tree_id][sindex[0]] < sdata[0]);
                 // printf("radius: %f, dist: %f\n, should_skip: %d", radii[t_tree_id][sindex[0]], sdata[0], should_skip);
                 // printf("calculate extension\n");
@@ -517,12 +517,12 @@ namespace pRRTC {
                 }
 
                 int l_print_id = atomicAdd(&print_id, 1);
-                printf("%d checked edge between: %f %f %f %f %f %f %f %f\n and %f %f %f %f %f %f %f %f. Result: %d, Debug1: %d, Debug2: %d, sindex[0]: %d\n, Nearest Node copy: %f %f %f %f %f %f %f %f\n", 
-                    l_print_id,
-                    nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6], nearest_node[7],
-                    config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7], edge_good, !debug_collision, !debug_collision_2, sindex[0],
-                    nearest_node_copy[0], nearest_node_copy[1], nearest_node_copy[2], nearest_node_copy[3], nearest_node_copy[4], nearest_node_copy[5], nearest_node_copy[6], nearest_node_copy[7]
-                );
+                // printf("%d checked edge between: %f %f %f %f %f %f %f %f\n and %f %f %f %f %f %f %f %f. Result: %d, Debug1: %d, Debug2: %d, sindex[0]: %d\n, Nearest Node copy: %f %f %f %f %f %f %f %f\n", 
+                //     l_print_id,
+                //     nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6], nearest_node[7],
+                //     config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7], edge_good, !debug_collision, !debug_collision_2, sindex[0],
+                //     nearest_node_copy[0], nearest_node_copy[1], nearest_node_copy[2], nearest_node_copy[3], nearest_node_copy[4], nearest_node_copy[5], nearest_node_copy[6], nearest_node_copy[7]
+                // );
                 
                 // printf("%d Debug delta: %f %f %f %f %f %f %f %f\n %f %f %f %f %f %f %f %f\n",
                 // l_print_id,
@@ -571,10 +571,10 @@ namespace pRRTC {
                 __syncthreads();
                 if (tid == 0) {
                     atomicAdd((int *)&nodes_size[t_tree_id], 1);
-                    printf("added config to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n parent: %f %f %f %f %f %f %f %f\n", 
-                            t_tree_id, index, bid, sindex[0], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7],
-                            nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6], nearest_node[7]
-                        );
+                    // printf("added config to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n parent: %f %f %f %f %f %f %f %f\n", 
+                    //         t_tree_id, index, bid, sindex[0], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7],
+                    //         nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6], nearest_node[7]
+                    //     );
                 }
                 __syncthreads();
                 /* connect */
@@ -651,7 +651,7 @@ namespace pRRTC {
                     __syncthreads();
                     if (tid == 0) {
                         atomicAdd((int *)&nodes_size[t_tree_id], 1);
-                        printf("added config from extension to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n", t_tree_id, index, bid, t_parents[index], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7]);
+                        // printf("added config from extension to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n", t_tree_id, index, bid, t_parents[index], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7]);
                         // print_config(config, dim);
                     }
                     i_extensions++;
@@ -659,11 +659,11 @@ namespace pRRTC {
                 }
                 if (i_extensions == n_extensions) { // connected
                     if (tid == 0 && atomicCAS((int *)&solved, 0, 1) == 0) {
-                        printf("in connected\n");
-                        printf("config at connection: %f %f %f %f %f %f %f %f\n nearest node: %f %f %f %f %f %f %f %f\n", 
-                            config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7],
-                            nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6], nearest_node[7]
-                        );
+                        // printf("in connected\n");
+                        // printf("config at connection: %f %f %f %f %f %f %f %f\n nearest node: %f %f %f %f %f %f %f %f\n", 
+                        //     config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7],
+                        //     nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6], nearest_node[7]
+                        // );
                         // trace back to the start and goal.
                         int current = index;
                         int parent;
@@ -673,7 +673,7 @@ namespace pRRTC {
                             parent = t_parents[current];
                             cost += device_utils::l2_dist(&t_nodes[current * dim], &t_nodes[parent * dim], dim);
                             for (int i = 0; i < dim; i++) path[t_tree_id][t_path_size * dim + i] = t_nodes[current * dim + i];
-                            printf("added to path[%d]: %f %f %f %f %f %f %f %f\n", t_tree_id, path[t_tree_id][t_path_size * dim], path[t_tree_id][t_path_size * dim + 1], path[t_tree_id][t_path_size * dim + 2], path[t_tree_id][t_path_size * dim + 3], path[t_tree_id][t_path_size * dim + 4], path[t_tree_id][t_path_size * dim + 5], path[t_tree_id][t_path_size * dim + 6], path[t_tree_id][t_path_size * dim + 7]);
+                            // printf("added to path[%d]: %f %f %f %f %f %f %f %f\n", t_tree_id, path[t_tree_id][t_path_size * dim], path[t_tree_id][t_path_size * dim + 1], path[t_tree_id][t_path_size * dim + 2], path[t_tree_id][t_path_size * dim + 3], path[t_tree_id][t_path_size * dim + 4], path[t_tree_id][t_path_size * dim + 5], path[t_tree_id][t_path_size * dim + 6], path[t_tree_id][t_path_size * dim + 7]);
                             //print_config(&t_nodes[current * dim], dim);
                             t_path_size++;
                             current = parent;
@@ -682,13 +682,13 @@ namespace pRRTC {
                         //printf("GPU path above");
                         if (t_tree_id == 1) reached_goal_idx = current;
                         current = sindex[0];
-                        printf("sindex[0]: %d\n", sindex[0]);
+                        // printf("sindex[0]: %d\n", sindex[0]);
                         // printf("entered here2\n");
                         while(o_parents[current] != current) {
                             parent = o_parents[current];
                             cost += device_utils::l2_dist(&o_nodes[current * dim], &o_nodes[parent * dim], dim);
                             for (int i = 0; i < dim; i++) path[o_tree_id][o_path_size * dim + i] = o_nodes[current * dim + i];
-                            printf("added to path[%d]: %f %f %f %f %f %f %f %f\n", o_tree_id, path[o_tree_id][o_path_size * dim], path[o_tree_id][o_path_size * dim + 1], path[o_tree_id][o_path_size * dim + 2], path[o_tree_id][o_path_size * dim + 3], path[o_tree_id][o_path_size * dim + 4], path[o_tree_id][o_path_size * dim + 5], path[o_tree_id][o_path_size * dim + 6], path[o_tree_id][o_path_size * dim + 7]);
+                            // printf("added to path[%d]: %f %f %f %f %f %f %f %f\n", o_tree_id, path[o_tree_id][o_path_size * dim], path[o_tree_id][o_path_size * dim + 1], path[o_tree_id][o_path_size * dim + 2], path[o_tree_id][o_path_size * dim + 3], path[o_tree_id][o_path_size * dim + 4], path[o_tree_id][o_path_size * dim + 5], path[o_tree_id][o_path_size * dim + 6], path[o_tree_id][o_path_size * dim + 7]);
                             //print_config(&o_nodes[current * dim], dim);
                             o_path_size++;
                             current = parent;
@@ -699,7 +699,7 @@ namespace pRRTC {
                         path_size[o_tree_id] = o_path_size;
                         solved_iters = iter;
                         
-                        printf("t_tree_id %d, t_path_size: %d, o_path_size: %d\n", t_tree_id, t_path_size, o_path_size);
+                        // printf("t_tree_id %d, t_path_size: %d, o_path_size: %d\n", t_tree_id, t_path_size, o_path_size);
                         // return;
                     }
                     __syncthreads();
