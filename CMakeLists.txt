@@ -22,7 +22,7 @@ set(CMAKE_CUDA_ARCHITECTURES 86)
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
-add_subdirectory(extern/vamp)
+add_subdirectory(extern/vamp EXCLUDE_FROM_ALL)
 
 
 ### Begin vamp compiler options
@@ -110,12 +110,17 @@ add_executable(evaluate_mbm
     # src/planning/pRRT.cu
     # src/planning/nRRT.cu
     src/planning/pRRTC.cu
+    src/planning/nRRTC.cu
 )
 
 target_include_directories(evaluate_mbm
     PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/vamp/src/impl
+    ${CMAKE_CURRENT_SOURCE_DIR}/build/_deps/nigh-src/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/build/_deps/pdqsort-src
 )
+
 
 target_link_libraries(evaluate_mbm
     PRIVATE
@@ -123,12 +128,16 @@ target_link_libraries(evaluate_mbm
     Eigen3::Eigen
 )
 
+target_compile_options(evaluate_mbm PRIVATE
+    -Wno-c++11-narrowing
+)
+
 ### single_mbm
 add_executable(single_mbm
     scripts/single_mbm.cpp
     # src/planning/pRRT.cu
     # src/planning/nRRT.cu
-    # src/planning/nRRTC.cu
+    src/planning/nRRTC.cu
     src/planning/pRRTC.cu
 )
 
@@ -171,18 +180,18 @@ target_compile_options(single_mbm PRIVATE
 # )
 
 ### check_edge script
-add_executable(edge_check
-    scripts/edge_check.cu
-)
+# add_executable(edge_check
+#     scripts/edge_check.cu
+# )
 
-target_include_directories(edge_check
-    PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
+# target_include_directories(edge_check
+#     PRIVATE
+#     ${CMAKE_CURRENT_SOURCE_DIR}
+# )
 
-target_link_libraries(edge_check
-    PRIVATE
-    # template_lib
-    nlohmann_json::nlohmann_json
-    Eigen3::Eigen
-)
+# target_link_libraries(edge_check
+#     PRIVATE
+#     # template_lib
+#     nlohmann_json::nlohmann_json
+#     Eigen3::Eigen
+# )

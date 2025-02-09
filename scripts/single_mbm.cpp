@@ -12,7 +12,6 @@
 #include <vamp/collision/environment.hh>
 #include <vamp/robots/fetch.hh> 
 #include <vamp/robots/panda.hh>
-// #include "/home/pranav/vamp/src/impl/vamp/collision/"
 
 
 
@@ -178,10 +177,6 @@ void run_planner(json &data, Environment<float> &env, struct pRRTC_settings &set
     for (auto i = 1ul; i < result.path.size(); i++) {
         auto cfg1 = result.path[i-1];
         auto cfg2 = result.path[i];
-        std::cout << "config1: ";
-        print_cfg<Robot>(cfg1);
-        std::cout << "config2: ";
-        print_cfg<Robot>(cfg2);
         typename vampRobot::Configuration vamp_cfg1(cfg1);
         typename vampRobot::Configuration vamp_cfg2(cfg2);
         if (not vamp::planning::validate_motion<vampRobot, rake, 1>(vamp_cfg1, vamp_cfg2, vamp_env)) {

@@ -7,11 +7,78 @@
 #include "src/planning/Planners.hh"
 #include "src/planning/pRRTC_settings.hh"
 
+#include <vamp/planning/validate.hh>
+#include <vamp/collision/factory.hh>
+#include <vamp/collision/environment.hh>
+#include <vamp/robots/fetch.hh> 
+#include <vamp/robots/panda.hh>
 
 
 using json = nlohmann::json;
 
 using namespace ppln::collision;
+
+static constexpr const std::size_t rake = vamp::FloatVectorWidth;
+
+
+vamp::collision::Environment<vamp::FloatVector<rake>> problem_dict_vamp(const json& problem, const std::string &name) {
+    auto env = vamp::collision::Environment<float>();
+    
+    // Handle spheres
+    for (const auto& obj : problem["sphere"]) {
+        const json& position = obj["position"];
+        auto sphere = vamp::collision::factory::sphere::array(
+            {position[0], position[1], position[2]},
+            obj["radius"]
+        );
+        env.spheres.emplace_back(sphere);
+    }
+
+    // Handle cylinders
+    if (name == "box") {
+        for (const auto& obj : problem["cylinder"]) {
+            const json& position = obj["position"];
+            const json& orientation = obj["orientation_euler_xyz"];
+            const float radius = obj["radius"];
+            const std::array<float, 3> dims = {radius, radius, radius/2.0f};
+            auto cuboid = vamp::collision::factory::cuboid::array(
+                {position[0], position[1], position[2]},
+                {orientation[0], orientation[1], orientation[2]},
+                dims
+            );
+            env.cuboids.emplace_back(cuboid);
+        }
+    } else {
+        for (const auto& obj : problem["cylinder"]) {
+            const json& position = obj["position"];
+            const json& orientation = obj["orientation_euler_xyz"];
+            const float radius = obj["radius"];
+            const float length = obj["length"];
+            auto capsule = vamp::collision::factory::capsule::center::array(
+                {position[0], position[1], position[2]},
+                {orientation[0], orientation[1], orientation[2]},
+                radius, length
+            );
+            env.capsules.emplace_back(capsule);
+        }
+    }
+
+    // Handle boxes
+    for (const auto& obj : problem["box"]) {
+        const json& position = obj["position"];
+        const json& orientation = obj["orientation_euler_xyz"];
+        const json& half_extents = obj["half_extents"];
+        auto cuboid = vamp::collision::factory::cuboid::array(
+            {position[0], position[1], position[2]},
+            {orientation[0], orientation[1], orientation[2]},
+            {half_extents[0], half_extents[1], half_extents[2]}
+        );
+        env.cuboids.emplace_back(cuboid);
+    }
+    env.sort();
+    auto env_v = vamp::collision::Environment<vamp::FloatVector<rake>>(env);
+    return env_v;
+}
 
 Environment<float> problem_dict_to_env(const json& problem, const std::string& name) {
     Environment<float> env{};
@@ -89,14 +156,15 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
 }
 
 void print_csv_header(std::ofstream &outfile) {
-    outfile << "problem_name,problem_idx,solved,cost,path_length,start_tree_size,goal_tree_size,iters,wall_ns,kernel_ns,";
+    outfile << "problem_name,problem_idx,solved,vamp_valid,cost,path_length,start_tree_size,goal_tree_size,iters,wall_ns,kernel_ns,";
     outfile << "num_new_configs,granularity,range,balance,tree_ratio,dynamic_domain,dd_alpha,dd_radius,dd_min_radius\n";
 }
 template<typename Robot>
-void print_planner_result_to_file(PlannerResult<Robot> &result, pRRTC_settings &settings, std::string problem_name, int problem_idx, std::ofstream &outfile) {
+void print_planner_result_to_file(PlannerResult<Robot> &result, pRRTC_settings &settings, std::string problem_name, int problem_idx, std::ofstream &outfile, bool vamp_valid) {
     outfile << problem_name << ", ";
     outfile << problem_idx << ", ";
     outfile << result.solved << ", ";
+    outfile << vamp_valid << ", ";
     outfile << result.cost << ", ";
     outfile << result.path_length << ", ";
     outfile << result.start_tree_size << ", ";
@@ -117,7 +185,7 @@ void print_planner_result_to_file(PlannerResult<Robot> &result, pRRTC_settings &
 }
 
 
-template<typename Robot>
+template <typename Robot, typename vampRobot>
 void run_planning(const json &problems, pRRTC_settings &settings, std::string run_name, std::string robot_name) {
     using Configuration = typename Robot::Configuration;
     std::ofstream outfile("test_output/"+robot_name+"_"+run_name+".csv");
@@ -144,6 +212,7 @@ void run_planning(const json &problems, pRRTC_settings &settings, std::string ru
                 continue;
             }
             auto env = problem_dict_to_env(data, name);
+            auto vamp_env = problem_dict_vamp(data, name);
             printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
             Configuration start = data["start"];
             std::vector<Configuration> goals = data["goals"];
@@ -158,43 +227,27 @@ void run_planning(const json &problems, pRRTC_settings &settings, std::string ru
             }
             std::cout << "cost: " << result.cost << "\n";
             results[name].emplace_back(result);
-            print_planner_result_to_file(result, settings, name, i+1, outfile);
+            
+            // Validate the result
+            bool vamp_valid = true;
+            for (auto i = 1ul; i < result.path.size(); i++) {
+                auto cfg1 = result.path[i-1];
+                auto cfg2 = result.path[i];
+                typename vampRobot::Configuration vamp_cfg1(cfg1);
+                typename vampRobot::Configuration vamp_cfg2(cfg2);
+                if (not vamp::planning::validate_motion<vampRobot, rake, 1>(vamp_cfg1, vamp_cfg2, vamp_env)) {
+                    int index1 = result.path.size() - i - 1;
+                    int index2 = result.path.size() - (i-1) - 1;
+                    std::cout << "Vamp found collision in solution path between " << index1 << " and " << index2 << std::endl;
+                    vamp_valid = false;
+                    break;
+                }
+            }
+
+
+            print_planner_result_to_file(result, settings, name, i+1, outfile, vamp_valid);
         }
     }
-
-    // for (auto& name : prob_names) {
-    //     std::cout << name << std::endl;
-
-    //     // calculate stats for cost 
-    //     float avg_cost = 0;
-    //     float min_cost = 1e9;
-    //     float max_cost = 0;
-    //     for (auto &result : results[name]) {
-    //         avg_cost += result.cost;
-    //         min_cost = std::min(min_cost, result.cost);
-    //         max_cost = std::max(max_cost, result.cost);
-    //     }
-    //     avg_cost /= results[name].size();
-    //     std::cout << "avg cost: " << avg_cost << std::endl;
-    //     std::cout << "min cost: " << min_cost << std::endl;
-    //     std::cout << "max cost: " << max_cost << std::endl;
-    //     std::cout << std::endl;
-
-    //     // calculate stats for cost 
-    //     std::size_t net_time = 0;
-    //     std::size_t min_time = 1e9;
-    //     std::size_t max_time = 0;
-    //     for (auto &result : results[name]) {
-    //         net_time += result.nanoseconds;
-    //         min_time = std::min(min_time, result.nanoseconds);
-    //         max_time = std::max(max_time, result.nanoseconds);
-    //     }
-    //     float avg_time = net_time / results[name].size();
-    //     std::cout << "avg time (μs): " << avg_time/1000 << std::endl;
-    //     std::cout << "min time (μs): " << min_time/1000 << std::endl;
-    //     std::cout << "max time (μs): " << max_time/1000 << std::endl;
-    //     std::cout << "----" << std::endl;
-    // }
 }
 
 int main(int argc, char* argv[]) {
@@ -207,7 +260,7 @@ int main(int argc, char* argv[]) {
     settings.range = 1.0;
     settings.balance = 1;
     settings.tree_ratio = 0.5;
-    settings.dynamic_domain = true;
+    settings.dynamic_domain = false;
     settings.dd_radius = 15.0;
     settings.dd_min_radius = 1.0;
     settings.dd_alpha = 0.0001;
@@ -228,9 +281,9 @@ int main(int argc, char* argv[]) {
     json all_data = json::parse(f);
     json problems = all_data["problems"];
     if (robot_name == "fetch") {
-        run_planning<robots::Fetch>(problems, settings, run_name, robot_name);
+        run_planning<robots::Fetch, vamp::robots::Fetch>(problems, settings, run_name, robot_name);
     } else if (robot_name == "panda") {
-        run_planning<robots::Panda>(problems, settings, run_name, robot_name);
+        run_planning<robots::Panda, vamp::robots::Panda>(problems, settings, run_name, robot_name);
     } else {
         std::cerr << "Unsupported robot type: " << robot_name << "\n";
         return 1;

@@ -326,9 +326,9 @@ namespace pRRTC {
     __global__ void
     __launch_bounds__(128, 8)
     rrtc(
-        float **nodes,
-        int **parents,
-        float **radii,
+        volatile float **nodes,
+        volatile int **parents,
+        volatile float **radii,
         HaltonState<Robot> *halton_states,
         curandState *rng_states,
         ppln::collision::Environment<float> *env
@@ -345,14 +345,14 @@ namespace pRRTC {
         __shared__ int o_tree_id; // the other tree
         __shared__ volatile float config[dim];
         __shared__ volatile float sdata[MAX_GRANULARITY];
-        __shared__ volatile unsigned int sindex[MAX_GRANULARITY];
+        __shared__ volatile int sindex[MAX_GRANULARITY];
         __shared__ volatile unsigned int local_cc_result[1];
-        __shared__ float *t_nodes;
-        __shared__ float *o_nodes;
-        __shared__ int *t_parents;
-        __shared__ int *o_parents;
+        __shared__ volatile float *t_nodes;
+        __shared__ volatile float *o_nodes;
+        __shared__ volatile int *t_parents;
+        __shared__ volatile int *o_parents;
         __shared__ float scale;
-        __shared__ float *nearest_node;
+        __shared__ volatile float *nearest_node;
         __shared__ float delta[dim];
         // __shared__ float var_cache[MAX_GRANULARITY][10];
         __shared__ volatile int index;
@@ -417,12 +417,12 @@ namespace pRRTC {
             }
 
             // divide up the work of finding nearest neighbor among the threads
-            float local_min_dist = INFINITY;
-            unsigned int local_near_idx = 0;
+            float local_min_dist = FLT_MAX;
+            int local_near_idx = 0;
             float dist;
             int size = nodes_size[t_tree_id];
             for (int i = tid; i < size; i += blockDim.x) {
-                dist = device_utils::sq_l2_dist(&t_nodes[i * dim], (float *) config, dim);
+                dist = device_utils::sq_l2_dist((float *)&t_nodes[i * dim], (float *) config, dim);
                 if (dist < local_min_dist) {
                     local_min_dist = dist;
                     local_near_idx = i;
@@ -444,7 +444,7 @@ namespace pRRTC {
 
             // by this point NN dist = sdata[0], NN index = sindex[0]
             // now calculate the extension
-            float nearest_node_copy[dim];
+            volatile float nearest_node_copy[dim];
             if (tid == 0) {
                 sdata[0] = sqrt(sdata[0]);
                 scale = min(1.0f, d_settings.range / (sdata[0]));
@@ -529,13 +529,6 @@ namespace pRRTC {
                 // delta[0], delta[1], delta[2], delta[3], delta[4], delta[5], delta[6], delta[7],
                 // debug_delta[0], debug_delta[1], debug_delta[2], debug_delta[3], debug_delta[4], debug_delta[5], debug_delta[6], debug_delta[7]
                 // );
-                // printf("%d Each thread Result:\n%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n",
-                // l_print_id,
-                // each_thread_result[0], each_thread_result[1], each_thread_result[2], each_thread_result[3], each_thread_result[4], each_thread_result[5], each_thread_result[6], each_thread_result[7], each_thread_result[8], each_thread_result[9], each_thread_result[10], each_thread_result[11], each_thread_result[12], each_thread_result[13], each_thread_result[14], each_thread_result[15], each_thread_result[16], each_thread_result[17], each_thread_result[18], each_thread_result[19], each_thread_result[20], each_thread_result[21], each_thread_result[22], each_thread_result[23], each_thread_result[24], each_thread_result[25], each_thread_result[26], each_thread_result[27], each_thread_result[28], each_thread_result[29], each_thread_result[30], each_thread_result[31], 
-                // each_thread_result[32], each_thread_result[33], each_thread_result[34], each_thread_result[35], each_thread_result[36], each_thread_result[37], each_thread_result[38], each_thread_result[39], each_thread_result[40], each_thread_result[41], each_thread_result[42], each_thread_result[43], each_thread_result[44], each_thread_result[45], each_thread_result[46], each_thread_result[47], each_thread_result[48], each_thread_result[49], each_thread_result[50], each_thread_result[51], each_thread_result[52], each_thread_result[53], each_thread_result[54], each_thread_result[55], each_thread_result[56], each_thread_result[57], each_thread_result[58], each_thread_result[59], each_thread_result[60], each_thread_result[61], each_thread_result[62], each_thread_result[63],
-                // each_thread_result[64], each_thread_result[65], each_thread_result[66], each_thread_result[67], each_thread_result[68], each_thread_result[69], each_thread_result[70], each_thread_result[71], each_thread_result[72], each_thread_result[73], each_thread_result[74], each_thread_result[75], each_thread_result[76], each_thread_result[77], each_thread_result[78], each_thread_result[79], each_thread_result[80], each_thread_result[81], each_thread_result[82], each_thread_result[83], each_thread_result[84], each_thread_result[85], each_thread_result[86], each_thread_result[87], each_thread_result[88], each_thread_result[89], each_thread_result[90], each_thread_result[91], each_thread_result[92], each_thread_result[93], each_thread_result[94], each_thread_result[95],
-                // each_thread_result[96], each_thread_result[97], each_thread_result[98], each_thread_result[99], each_thread_result[100], each_thread_result[101], each_thread_result[102], each_thread_result[103], each_thread_result[104], each_thread_result[105], each_thread_result[106], each_thread_result[107], each_thread_result[108], each_thread_result[109], each_thread_result[110], each_thread_result[111], each_thread_result[112], each_thread_result[113], each_thread_result[114], each_thread_result[115], each_thread_result[116], each_thread_result[117], each_thread_result[118], each_thread_result[119], each_thread_result[120], each_thread_result[121], each_thread_result[122], each_thread_result[123], each_thread_result[124], each_thread_result[125], each_thread_result[126], each_thread_result[127]
-                // );
                 
             }
             __syncthreads();
@@ -550,7 +543,7 @@ namespace pRRTC {
                     
                     if (d_settings.dynamic_domain) {
                         radii[t_tree_id][index] = FLT_MAX;
-                        float *radius_ptr = &radii[t_tree_id][sindex[0]];
+                        volatile float *radius_ptr = &radii[t_tree_id][sindex[0]];
                         float old_radius, new_radius;
                         int expected, desired;
                         do {
@@ -560,7 +553,7 @@ namespace pRRTC {
                             new_radius = old_radius * (1 + d_settings.dd_alpha);
                             expected = __float_as_int(old_radius);
                             desired = __float_as_int(new_radius);
-                        } while (atomicCAS(reinterpret_cast<int*>(radius_ptr), expected, desired) != expected);
+                        } while (atomicCAS((int *)radius_ptr, expected, desired) != expected);
                     }
                 }
                 __syncthreads();
@@ -569,6 +562,7 @@ namespace pRRTC {
                     t_nodes[index * dim + tid] = config[tid];
                 }
                 __syncthreads();
+                // __threadfence_system();
                 if (tid == 0) {
                     atomicAdd((int *)&nodes_size[t_tree_id], 1);
                     // printf("added config to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n parent: %f %f %f %f %f %f %f %f\n", 
@@ -582,7 +576,7 @@ namespace pRRTC {
                 local_near_idx = 0;
                 int size = nodes_size[o_tree_id];
                 for (unsigned int i = tid; i < size; i += blockDim.x) {
-                    dist = device_utils::sq_l2_dist(&o_nodes[i * dim], (float *)config, dim);
+                    dist = device_utils::sq_l2_dist((float *)&o_nodes[i * dim], (float *)config, dim);
                     if (dist < local_min_dist) {
                         local_min_dist = dist;
                         local_near_idx = i;
@@ -649,6 +643,7 @@ namespace pRRTC {
                         t_nodes[index * dim + tid] = config[tid];
                     }
                     __syncthreads();
+                    // __threadfence_system();
                     if (tid == 0) {
                         atomicAdd((int *)&nodes_size[t_tree_id], 1);
                         // printf("added config from extension to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n", t_tree_id, index, bid, t_parents[index], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7]);
@@ -671,7 +666,7 @@ namespace pRRTC {
                         int o_path_size = 0;
                         while (t_parents[current] != current) {
                             parent = t_parents[current];
-                            cost += device_utils::l2_dist(&t_nodes[current * dim], &t_nodes[parent * dim], dim);
+                            cost += device_utils::l2_dist((float *)&t_nodes[current * dim], (float *)&t_nodes[parent * dim], dim);
                             for (int i = 0; i < dim; i++) path[t_tree_id][t_path_size * dim + i] = t_nodes[current * dim + i];
                             // printf("added to path[%d]: %f %f %f %f %f %f %f %f\n", t_tree_id, path[t_tree_id][t_path_size * dim], path[t_tree_id][t_path_size * dim + 1], path[t_tree_id][t_path_size * dim + 2], path[t_tree_id][t_path_size * dim + 3], path[t_tree_id][t_path_size * dim + 4], path[t_tree_id][t_path_size * dim + 5], path[t_tree_id][t_path_size * dim + 6], path[t_tree_id][t_path_size * dim + 7]);
                             //print_config(&t_nodes[current * dim], dim);
@@ -686,7 +681,7 @@ namespace pRRTC {
                         // printf("entered here2\n");
                         while(o_parents[current] != current) {
                             parent = o_parents[current];
-                            cost += device_utils::l2_dist(&o_nodes[current * dim], &o_nodes[parent * dim], dim);
+                            cost += device_utils::l2_dist((float *)&o_nodes[current * dim], (float *)&o_nodes[parent * dim], dim);
                             for (int i = 0; i < dim; i++) path[o_tree_id][o_path_size * dim + i] = o_nodes[current * dim + i];
                             // printf("added to path[%d]: %f %f %f %f %f %f %f %f\n", o_tree_id, path[o_tree_id][o_path_size * dim], path[o_tree_id][o_path_size * dim + 1], path[o_tree_id][o_path_size * dim + 2], path[o_tree_id][o_path_size * dim + 3], path[o_tree_id][o_path_size * dim + 4], path[o_tree_id][o_path_size * dim + 5], path[o_tree_id][o_path_size * dim + 6], path[o_tree_id][o_path_size * dim + 7]);
                             //print_config(&o_nodes[current * dim], dim);
@@ -707,7 +702,7 @@ namespace pRRTC {
                 // printf("here8\n");
             }
             else if (d_settings.dynamic_domain && tid == 0) {         
-                float *radius_ptr = &radii[t_tree_id][sindex[0]];
+                volatile float *radius_ptr = &radii[t_tree_id][sindex[0]];
                 float old_radius, new_radius;
                 int expected, desired;
                 do {
@@ -720,7 +715,7 @@ namespace pRRTC {
                     }
                     expected = __float_as_int(old_radius);
                     desired = __float_as_int(new_radius);
-                } while (atomicCAS(reinterpret_cast<int*>(radius_ptr), expected, desired) != expected);
+                } while (atomicCAS((int *)radius_ptr, expected, desired) != expected);
             }
             __syncthreads();
             if (solved != 0) return;
@@ -753,12 +748,12 @@ namespace pRRTC {
 
         // std::cout << "here2" << std::endl;
         int num_goals = goals.size();
-        float *nodes[2];
-        int *parents[2];
-        float *radii[2];
-        float **d_nodes;
-        int **d_parents;
-        float **d_radii;
+        volatile float *nodes[2];
+        volatile int *parents[2];
+        volatile float *radii[2];
+        volatile float **d_nodes;
+        volatile int **d_parents;
+        volatile float **d_radii;
         cudaMalloc(&d_nodes, 2 * sizeof(float*));
         cudaMalloc(&d_parents, 2 * sizeof(int*));
         cudaMalloc(&d_radii, 2 * sizeof(float*));
@@ -776,18 +771,18 @@ namespace pRRTC {
         // std::cout << "here3" << std::endl;
 
         // add start to tree_a and goals to tree_b
-        cudaMemcpy(nodes[0], start.data(), config_size, cudaMemcpyHostToDevice);
-        cudaMemcpy(parents[0], &start_index, sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy((void *)nodes[0], start.data(), config_size, cudaMemcpyHostToDevice);
+        cudaMemcpy((void *)parents[0], &start_index, sizeof(int), cudaMemcpyHostToDevice);
 
-        cudaMemcpy(nodes[1], goals.data(), config_size * num_goals, cudaMemcpyHostToDevice);
+        cudaMemcpy((void *)nodes[1], goals.data(), config_size * num_goals, cudaMemcpyHostToDevice);
         std::vector<int> parents_b_init(num_goals);
         iota(parents_b_init.begin(), parents_b_init.end(), 0); // consecutive integers from 0 ... num_goals - 1
-        cudaMemcpy(parents[1], parents_b_init.data(), sizeof(int) * num_goals, cudaMemcpyHostToDevice);
+        cudaMemcpy((void *)parents[1], parents_b_init.data(), sizeof(int) * num_goals, cudaMemcpyHostToDevice);
 
         // initialize radii
         std::vector<float> radii_init(num_goals, FLT_MAX);
-        cudaMemcpy(radii[0], radii_init.data(), sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy(radii[1], radii_init.data(), sizeof(float) * num_goals, cudaMemcpyHostToDevice);
+        cudaMemcpy((void *)radii[0], radii_init.data(), sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy((void *)radii[1], radii_init.data(), sizeof(float) * num_goals, cudaMemcpyHostToDevice);
         // std::cout << "here4" << std::endl;
         // create a curandState for each thread -> holds state of RNG for each thread seperately
         // For growing the tree we will create NUM_NEW_CONFIGS threads
@@ -882,12 +877,12 @@ namespace pRRTC {
         
         cleanup_environment_on_device(env, h_environment);
         reset_device_variables();
-        cudaFree(nodes[0]);
-        cudaFree(nodes[1]);
-        cudaFree(parents[0]);
-        cudaFree(parents[1]);
-        cudaFree(radii[0]);
-        cudaFree(radii[1]);
+        cudaFree((void *)nodes[0]);
+        cudaFree((void *)nodes[1]);
+        cudaFree((void *)parents[0]);
+        cudaFree((void *)parents[1]);
+        cudaFree((void *)radii[0]);
+        cudaFree((void *)radii[1]);
         cudaFree(rng_states);
         cudaFree(halton_states);
         cudaFree(d_nodes);
