@@ -342,8 +342,8 @@ namespace pRRTC {
         static constexpr auto dim = Robot::dimension;
         const int tid = threadIdx.x;
         const int bid = blockIdx.x; // 0 ... NUM_NEW_CONFIGS
-        const int lid = threadIdx.x%32;
-        const int wid = threadIdx.x/32;
+        // const int lid = threadIdx.x%32;
+        // const int wid = threadIdx.x/32;
         __shared__ int t_tree_id; // this tree
         __shared__ int o_tree_id; // the other tree
         __shared__ volatile float config[dim];
@@ -372,7 +372,7 @@ namespace pRRTC {
             // }
             // __syncthreads();
             if (tid == 0) {
-                printf("iter: %d, bid: %d\n", iter, bid);
+                // printf("iter: %d, bid: %d\n", iter, bid);
                 iter++;
                 if (iter > d_settings.max_iters) {
                     // printf("max iters reached from bid: %d\n", bid);
@@ -493,9 +493,9 @@ namespace pRRTC {
             // __syncthreads();
             // bool edge_good = not blockAnyTrue(config_in_collision, tid, wid, lid);
             atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
+            __syncthreads();
             bool edge_good = local_cc_result[0] == 0;
             // bool repeated_node = (sdata[0]==0);
-            __syncthreads();
             grid.sync();
             // if (tid == 0) {
             //     // check edge with loop to verify
@@ -571,7 +571,7 @@ namespace pRRTC {
                     t_nodes[index * dim + tid] = config[tid];
                 }
                 __syncthreads();
-                // __threadfence_system();
+                __threadfence_system();
             }
             grid.sync();
             if (edge_good) {
@@ -639,9 +639,9 @@ namespace pRRTC {
                     bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, tid);
                     // bool edge_good = not blockAnyTrue(config_in_collision, tid, wid, lid);
                     atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
-                    bool edge_good = local_cc_result[0] == 0;
                     __syncthreads();
-                    if (!edge_good) break;
+                    bool ext_edge_good = local_cc_result[0] == 0;
+                    if (!ext_edge_good) break;
                     // if (local_cc_result[0] != 0) break;
                     /* add extension to tree */
                     if (tid == 0) {
@@ -659,7 +659,7 @@ namespace pRRTC {
                         t_nodes[index * dim + tid] = config[tid];
                     }
                     __syncthreads();
-                    // __threadfence_system();
+                    __threadfence_system();
                     // if (tid == 0) {
                     //     atomicAdd((int *)&nodes_size[t_tree_id], 1);
                     //     // printf("added config from extension to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n", t_tree_id, index, bid, t_parents[index], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7]);

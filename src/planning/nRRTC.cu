@@ -52,7 +52,14 @@ namespace nRRTC {
     };
 
     template<typename Robot>
-    __device__ void halton_initialize(HaltonState<Robot>& state, size_t skip_iterations) {
+    __device__ void halton_initialize(HaltonState<Robot>& state, size_t skip_iterations, curandState& rng_state, int idx) {
+        
+        float primes[16] = {
+            3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f, 23.f,
+            29.f, 31.f, 37.f, 41.f, 43.f, 47.f, 53.f, 59.f
+        };
+        if (idx != 0) shuffle_array(primes, 16, rng_state);
+        
         // Initialize bases from primes
         for (size_t i = 0; i < Robot::dimension; i++) {
             state.b[i] = primes[i];
@@ -105,8 +112,8 @@ namespace nRRTC {
         if (idx >= d_settings.num_new_configs) return;
         int skip = (curand_uniform(&cr_states[idx]) * 50000.0f);
         if (idx == 0) skip = 0;
-        if (idx == 1) skip = 100000;
-        halton_initialize(states[idx], skip);
+        // if (idx == 1) skip = 100000;
+        halton_initialize(states[idx], skip, cr_states[idx], idx);
     }
 
     __device__ inline void print_config(float *config, int dim) {
