@@ -217,7 +217,7 @@ int main(int argc, char* argv[]) {
     auto vamp_env = problem_dict_vamp(data, name);
     printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
     struct pRRTC_settings settings;
-    settings.num_new_configs = 600;
+    settings.num_new_configs = 100;
     settings.max_iters = 1000000;
     settings.granularity = 128;
     settings.range = 1.0;
