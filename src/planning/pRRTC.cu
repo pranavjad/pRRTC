@@ -330,9 +330,9 @@ namespace pRRTC {
     __global__ void
     __launch_bounds__(128, 8)
     rrtc(
-        volatile float **nodes,
-        volatile int **parents,
-        volatile float **radii,
+        float **nodes,
+        int **parents,
+        float **radii,
         HaltonState<Robot> *halton_states,
         curandState *rng_states,
         ppln::collision::Environment<float> *env
@@ -765,12 +765,12 @@ namespace pRRTC {
 
         // std::cout << "here2" << std::endl;
         int num_goals = goals.size();
-        volatile float *nodes[2];
-        volatile int *parents[2];
-        volatile float *radii[2];
-        volatile float **d_nodes;
-        volatile int **d_parents;
-        volatile float **d_radii;
+        float *nodes[2];
+        int *parents[2];
+        float *radii[2];
+        float **d_nodes;
+        int **d_parents;
+        float **d_radii;
         cudaMalloc(&d_nodes, 2 * sizeof(float*));
         cudaMalloc(&d_parents, 2 * sizeof(int*));
         cudaMalloc(&d_radii, 2 * sizeof(float*));

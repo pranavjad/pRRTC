@@ -224,7 +224,7 @@ int main(int argc, char* argv[]) {
     settings.balance = 1;
     settings.tree_ratio = 0.5;
     settings.dynamic_domain = false;
-    settings.dd_radius = 8.0;
+    settings.dd_radius = 6.0;
     settings.dd_min_radius = 1.0;
     settings.dd_alpha = 0.0001;
     if (robot_name == "fetch") {
