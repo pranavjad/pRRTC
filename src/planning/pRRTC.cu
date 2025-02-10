@@ -49,6 +49,7 @@ namespace pRRTC {
     // constexpr int NUM_SAMPLE_RETRY = 3;
 
     constexpr int BLOCK_SIZE = 64;
+    constexpr float UNWRITTEN_VAL = -9999.0f;
 
     // Constants
     // __constant__ float primes[16] = {
@@ -325,6 +326,14 @@ namespace pRRTC {
         __syncthreads();
         return shared[0];
     }
+
+    __device__ __forceinline__ bool check_partially_written(volatile float *node, int dim) {
+        #pragma unroll
+        for (int i = 0; i < dim; i++) {
+            if (node[i] == UNWRITTEN_VAL) return true;
+        }
+        return false;
+    }
     
     template <typename Robot>
     __global__ void
@@ -414,7 +423,7 @@ namespace pRRTC {
                 local_cc_result[0] = 0;
             }
             __syncthreads();
-            grid.sync();
+            // grid.sync();
 
             // if (solved != 0) {
             //     // if (tid == 0) printf("Exiting because solved = %d\n, bid: %d, iter: %d", solved, bid, iter);
@@ -428,6 +437,7 @@ namespace pRRTC {
             // int size = nodes_size[t_tree_id];
             int size = atomic_free_index[t_tree_id];
             for (int i = tid; i < size; i += blockDim.x) {
+                while (check_partially_written(&t_nodes[i * dim], dim)) {};
                 dist = device_utils::sq_l2_dist((float *)&t_nodes[i * dim], (float *) config, dim);
                 if (dist < local_min_dist) {
                     local_min_dist = dist;
@@ -496,7 +506,8 @@ namespace pRRTC {
             __syncthreads();
             bool edge_good = local_cc_result[0] == 0;
             // bool repeated_node = (sdata[0]==0);
-            grid.sync();
+            // grid.sync();
+
             // if (tid == 0) {
             //     // check edge with loop to verify
             //     // printf("env debug: num_spheres: %d, num_capsules: %d, num_cylinders: %d, num_cuboids: %d\n", env->num_spheres, env->num_capsules, env->num_cylinders, env->num_cuboids);
@@ -573,7 +584,7 @@ namespace pRRTC {
                 __syncthreads();
                 __threadfence_system();
             }
-            grid.sync();
+            // grid.sync();
             if (edge_good) {
                 // if (tid == 0) {
                 //     atomicAdd((int *)&nodes_size[t_tree_id], 1);
@@ -589,6 +600,7 @@ namespace pRRTC {
                 // int size = nodes_size[o_tree_id];
                 int size = atomic_free_index[o_tree_id];
                 for (unsigned int i = tid; i < size; i += blockDim.x) {
+                    while (check_partially_written(&o_nodes[i * dim], dim)) {};
                     dist = device_utils::sq_l2_dist((float *)&o_nodes[i * dim], (float *)config, dim);
                     if (dist < local_min_dist) {
                         local_min_dist = dist;
@@ -624,7 +636,7 @@ namespace pRRTC {
                 }
                 __syncthreads();
             }
-            grid.sync();
+            // grid.sync();
             if (edge_good) {
                 // validate the edge to the nearest neighbor in opposite tree, go as far as we can
                 int i_extensions = 0;
@@ -734,7 +746,7 @@ namespace pRRTC {
                 } while (atomicCAS((int *)radius_ptr, expected, desired) != expected);
             }
             __syncthreads();
-            grid.sync();
+            // grid.sync();
             if (solved != 0) return;
         }
     }
@@ -785,8 +797,10 @@ namespace pRRTC {
         cudaMemcpy(d_parents, parents, 2 * sizeof(int*), cudaMemcpyHostToDevice);
         cudaMemcpy(d_radii, radii, 2 * sizeof(float*), cudaMemcpyHostToDevice);
 
-        // std::cout << "here3" << std::endl;
-
+        // set nodes to unitialized
+        std::vector<float> nodes_init(settings.max_samples * dim, UNWRITTEN_VAL);
+        cudaMemcpy((void *)nodes[0], nodes_init.data(), config_size * settings.max_samples, cudaMemcpyHostToDevice);
+        cudaMemcpy((void *)nodes[1], nodes_init.data(), config_size * settings.max_samples, cudaMemcpyHostToDevice);
         // add start to tree_a and goals to tree_b
         cudaMemcpy((void *)nodes[0], start.data(), config_size, cudaMemcpyHostToDevice);
         cudaMemcpy((void *)parents[0], &start_index, sizeof(int), cudaMemcpyHostToDevice);
@@ -832,40 +846,40 @@ namespace pRRTC {
         *h_solved = -1;
 
 
-        // auto kernel_start_time = std::chrono::steady_clock::now();
-        // rrtc<Robot><<<settings.num_new_configs, settings.granularity>>> (
-        //     d_nodes,
-        //     d_parents,
-        //     d_radii,
-        //     halton_states,
-        //     rng_states,
-        //     env
-        // );
-        // cudaDeviceSynchronize();
-        // res.kernel_ns = get_elapsed_nanoseconds(kernel_start_time);
-        // cudaCheckError(cudaGetLastError());
-
-        void* kernelArgs[] = {
-            (void*)&d_nodes,
-            (void*)&d_parents,
-            (void*)&d_radii,
-            (void*)&halton_states,
-            (void*)&rng_states,
-            (void*)&env
-        };
         auto kernel_start_time = std::chrono::steady_clock::now();
-        cudaError_t err = cudaLaunchCooperativeKernel(
-            (void*)rrtc<Robot>,  // Kernel function
-            settings.num_new_configs, settings.granularity,  // Grid and block dimensions
-            kernelArgs,  // Kernel arguments
-            0  // Shared memory per block (set to 0 so the compiler and auto compute)
+        rrtc<Robot><<<settings.num_new_configs, settings.granularity>>> (
+            d_nodes,
+            d_parents,
+            d_radii,
+            halton_states,
+            rng_states,
+            env
         );
-        if (err != cudaSuccess) {
-            std::cerr << "CUDA Kernel launch failed: " << cudaGetErrorString(err) << "\n";
-        }
         cudaDeviceSynchronize();
-        cudaCheckError(cudaGetLastError());
         res.kernel_ns = get_elapsed_nanoseconds(kernel_start_time);
+        cudaCheckError(cudaGetLastError());
+
+        // void* kernelArgs[] = {
+        //     (void*)&d_nodes,
+        //     (void*)&d_parents,
+        //     (void*)&d_radii,
+        //     (void*)&halton_states,
+        //     (void*)&rng_states,
+        //     (void*)&env
+        // };
+        // auto kernel_start_time = std::chrono::steady_clock::now();
+        // cudaError_t err = cudaLaunchCooperativeKernel(
+        //     (void*)rrtc<Robot>,  // Kernel function
+        //     settings.num_new_configs, settings.granularity,  // Grid and block dimensions
+        //     kernelArgs,  // Kernel arguments
+        //     0  // Shared memory per block (set to 0 so the compiler and auto compute)
+        // );
+        // if (err != cudaSuccess) {
+        //     std::cerr << "CUDA Kernel launch failed: " << cudaGetErrorString(err) << "\n";
+        // }
+        // cudaDeviceSynchronize();
+        // cudaCheckError(cudaGetLastError());
+        // res.kernel_ns = get_elapsed_nanoseconds(kernel_start_time);
         
         
         cudaMemcpyFromSymbol(current_samples, atomic_free_index, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
