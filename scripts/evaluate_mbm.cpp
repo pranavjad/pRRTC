@@ -205,6 +205,7 @@ void run_planning(const json &problems, pRRTC_settings &settings, std::string ru
     for (auto& name : prob_names) {
         std::cout << name << "\n";
         auto pset = problems[name];
+        
         for (int i = 0; i < pset.size(); i++) {
             std::cout << "idx: " << i << "\n";
             json data = pset[i];
@@ -257,11 +258,11 @@ int main(int argc, char* argv[]) {
     // 2, 128, 0.5, 1, 0
     settings.num_new_configs = 512;
     settings.granularity = 128;
-    settings.range = 1.0;
-    settings.balance = 1;
-    settings.tree_ratio = 0.5;
-    settings.dynamic_domain = false;
-    settings.dd_radius = 15.0;
+    settings.range = 2.0;
+    settings.balance = 2;
+    settings.tree_ratio = 1.0;
+    settings.dynamic_domain = true;
+    settings.dd_radius = 6.0;
     settings.dd_min_radius = 1.0;
     settings.dd_alpha = 0.0001;
     // settings.dd_min_radius = settings.range / 2.0f;

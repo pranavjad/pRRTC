@@ -18,11 +18,11 @@
 
 /*
 Parallelized RRTC:
-Each warp grows it's own tree.
+Each warp adds to a tree.
 */
 
 
-namespace nRRTC {
+namespace pwRRTC {
     using namespace ppln;
     __device__ volatile int solved = 0;
     __device__ int solved_free_index[2] = {0, 0};

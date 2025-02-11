@@ -437,7 +437,8 @@ namespace pRRTC {
             // int size = nodes_size[t_tree_id];
             int size = atomic_free_index[t_tree_id];
             for (int i = tid; i < size; i += blockDim.x) {
-                while (check_partially_written(&t_nodes[i * dim], dim)) {};
+                // while (check_partially_written(&t_nodes[i * dim], dim)) {};
+                if (check_partially_written(&t_nodes[i * dim], dim)) break;
                 dist = device_utils::sq_l2_dist((float *)&t_nodes[i * dim], (float *) config, dim);
                 if (dist < local_min_dist) {
                     local_min_dist = dist;
@@ -460,14 +461,14 @@ namespace pRRTC {
 
             // by this point NN dist = sdata[0], NN index = sindex[0]
             // now calculate the extension
-            volatile float nearest_node_copy[dim];
+            // volatile float nearest_node_copy[dim];
             if (tid == 0) {
                 sdata[0] = sqrt(sdata[0]);
                 scale = min(1.0f, d_settings.range / (sdata[0]));
                 nearest_node = &t_nodes[sindex[0] * dim];
-                for (int i = 0; i < dim; i++) {
-                    nearest_node_copy[i] = nearest_node[i];
-                }
+                // for (int i = 0; i < dim; i++) {
+                //     nearest_node_copy[i] = nearest_node[i];
+                // }
                 // printf("nearest node copy: %f %f %f %f %f %f %f %f\n sindex[0]: %d, t_tree_id: %d\n",
                 //     nearest_node_copy[0], nearest_node_copy[1], nearest_node_copy[2], nearest_node_copy[3], nearest_node_copy[4], nearest_node_copy[5], nearest_node_copy[6], nearest_node_copy[7]
                 //     , sindex[0], t_tree_id
@@ -582,7 +583,7 @@ namespace pRRTC {
                     t_nodes[index * dim + tid] = config[tid];
                 }
                 __syncthreads();
-                __threadfence_system();
+                // __threadfence_system();
             }
             // grid.sync();
             if (edge_good) {
@@ -600,7 +601,8 @@ namespace pRRTC {
                 // int size = nodes_size[o_tree_id];
                 int size = atomic_free_index[o_tree_id];
                 for (unsigned int i = tid; i < size; i += blockDim.x) {
-                    while (check_partially_written(&o_nodes[i * dim], dim)) {};
+                    // while (check_partially_written(&o_nodes[i * dim], dim)) {};
+                    if (check_partially_written(&o_nodes[i * dim], dim)) break;
                     dist = device_utils::sq_l2_dist((float *)&o_nodes[i * dim], (float *)config, dim);
                     if (dist < local_min_dist) {
                         local_min_dist = dist;
@@ -671,7 +673,7 @@ namespace pRRTC {
                         t_nodes[index * dim + tid] = config[tid];
                     }
                     __syncthreads();
-                    __threadfence_system();
+                    // __threadfence_system();
                     // if (tid == 0) {
                     //     atomicAdd((int *)&nodes_size[t_tree_id], 1);
                     //     // printf("added config from extension to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n", t_tree_id, index, bid, t_parents[index], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7]);
