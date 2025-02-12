@@ -179,7 +179,7 @@ void run_planner(json &data, Environment<float> &env, struct pRRTC_settings &set
         auto cfg2 = result.path[i];
         typename vampRobot::Configuration vamp_cfg1(cfg1);
         typename vampRobot::Configuration vamp_cfg2(cfg2);
-        if (not vamp::planning::validate_motion<vampRobot, rake, 1>(vamp_cfg1, vamp_cfg2, vamp_env)) {
+        if (not vamp::planning::validate_motion<vampRobot, rake, 32>(vamp_cfg1, vamp_cfg2, vamp_env)) {
             int index1 = result.path.size() - i - 1;
             int index2 = result.path.size() - (i-1) - 1;
             std::cout << "Vamp found collision in solution path between " << index1 << " and " << index2 << std::endl;

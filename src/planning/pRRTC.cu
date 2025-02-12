@@ -327,7 +327,7 @@ namespace pRRTC {
         return shared[0];
     }
 
-    __device__ __forceinline__ bool check_partially_written(volatile float *node, int dim) {
+    __device__ __forceinline__ bool check_partially_written(float *node, int dim) {
         #pragma unroll
         for (int i = 0; i < dim; i++) {
             if (node[i] == UNWRITTEN_VAL) return true;
@@ -355,20 +355,20 @@ namespace pRRTC {
         // const int wid = threadIdx.x/32;
         __shared__ int t_tree_id; // this tree
         __shared__ int o_tree_id; // the other tree
-        __shared__ volatile float config[dim];
-        __shared__ volatile float sdata[MAX_GRANULARITY];
-        __shared__ volatile int sindex[MAX_GRANULARITY];
-        __shared__ volatile unsigned int local_cc_result[1];
-        __shared__ volatile float *t_nodes;
-        __shared__ volatile float *o_nodes;
-        __shared__ volatile int *t_parents;
-        __shared__ volatile int *o_parents;
+        __shared__ float config[dim];
+        __shared__ float sdata[MAX_GRANULARITY];
+        __shared__ int sindex[MAX_GRANULARITY];
+        __shared__ unsigned int local_cc_result[1];
+        __shared__ float *t_nodes;
+        __shared__ float *o_nodes;
+        __shared__ int *t_parents;
+        __shared__ int *o_parents;
         __shared__ float scale;
-        __shared__ volatile float *nearest_node;
+        __shared__ float *nearest_node;
         __shared__ float delta[dim];
         // __shared__ float var_cache[MAX_GRANULARITY][10];
-        __shared__ volatile int index;
-        __shared__ volatile float vec[dim];
+        __shared__ int index;
+        __shared__ float vec[dim];
         __shared__ unsigned int n_extensions;
         __shared__ bool should_skip;
 
