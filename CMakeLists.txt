@@ -137,8 +137,8 @@ add_executable(single_mbm
     scripts/single_mbm.cpp
     # src/planning/pRRT.cu
     # src/planning/nRRT.cu
-    src/planning/nRRTC.cu
-    # src/planning/pRRTC.cu
+    # src/planning/nRRTC.cu
+    src/planning/pRRTC.cu
 )
 
 target_include_directories(single_mbm

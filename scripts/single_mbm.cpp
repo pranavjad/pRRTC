@@ -163,7 +163,7 @@ void run_planner(json &data, Environment<float> &env, struct pRRTC_settings &set
     using Configuration = typename Robot::Configuration;
     Configuration start = data["start"];
     std::vector<Configuration> goals = data["goals"];
-    auto result = nRRTC::solve<Robot>(start, goals, env, settings);
+    auto result = pRRTC::solve<Robot>(start, goals, env, settings);
     for (auto& cfg: result.path) {
         print_cfg<Robot>(cfg);
     }
