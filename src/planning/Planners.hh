@@ -80,3 +80,8 @@ namespace nRRTC {
     template <typename Robot>
     PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &environment, pRRTC_settings &settings);
 }
+
+namespace pwRRTC {
+    template <typename Robot>
+    PlannerResult<Robot> solve(typename Robot::Configuration &start, std::vector<typename Robot::Configuration> &goals, ppln::collision::Environment<float> &environment, pRRTC_settings &settings);
+}

@@ -163,7 +163,7 @@ void run_planner(json &data, Environment<float> &env, struct pRRTC_settings &set
     using Configuration = typename Robot::Configuration;
     Configuration start = data["start"];
     std::vector<Configuration> goals = data["goals"];
-    auto result = pRRTC::solve<Robot>(start, goals, env, settings);
+    auto result = pwRRTC::solve<Robot>(start, goals, env, settings);
     for (auto& cfg: result.path) {
         print_cfg<Robot>(cfg);
     }
@@ -217,7 +217,7 @@ int main(int argc, char* argv[]) {
     auto vamp_env = problem_dict_vamp(data, name);
     printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
     struct pRRTC_settings settings;
-    settings.num_new_configs = 512;
+    settings.num_new_configs = 64;
     settings.max_iters = 1000000;
     settings.granularity = 128;
     settings.range = 0.5;
