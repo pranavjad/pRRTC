@@ -26,7 +26,6 @@ namespace pwRRTC {
     using namespace ppln;
     __device__ volatile int solved = 0;
     __device__ volatile int atomic_free_index[2]; // separate for tree_a and tree_b
-    __device__ volatile int nodes_size[2];
     __device__ float path[2][500]; // solution path segments for tree_a, and tree_b
     __device__ int path_size[2] = {0, 0};
     __device__ float cost = 0.0;
@@ -118,9 +117,9 @@ namespace pwRRTC {
     }
 
     template <typename Robot>
-    __global__ void init_halton(HaltonState<Robot>* states, curandState* cr_states) {
+    __global__ void init_halton(HaltonState<Robot>* states, curandState* cr_states, int num_halton_states) {
         int idx = blockIdx.x * blockDim.x + threadIdx.x;
-        if (idx >= d_settings.num_new_configs) return;
+        if (idx >= num_halton_states) return;
         // int skip = (curand_uniform(&cr_states[idx]) * 50000.0f);
         int skip = 0;
         if (idx == 0) skip = 0;
@@ -276,8 +275,6 @@ namespace pwRRTC {
         
         atomic_free_index[0] = 0;
         atomic_free_index[1] = 0;
-        nodes_size[0] = 0;
-        nodes_size[1] = 0;
         
         path_size[0] = 0;
         path_size[1] = 0;
@@ -290,7 +287,7 @@ namespace pwRRTC {
         
         cost = 0.0f;
         reached_goal_idx = 0;
-        }
+    }
 
     void reset_device_variables() {
         reset_device_variables_kernel<<<1, 1>>>();
@@ -341,14 +338,15 @@ namespace pwRRTC {
         float *t_radii = radii[t_tree_id];
 
         while (true) {
-            if (solved != 0) return;
+            if (atomicAdd((int *)&solved, 0) != 0) return;
+            // if (lid == 0) printf("here0\n");
+            // if (solved != 0) return;
             // if (tid < dim) {
             //     config[tid] = curand_uniform(&rng_states[bid * dim + tid]);
             // }
-            // __syncthreads();
-            printf("iter: %d, global_wid: %d\n", iter, global_wid);
+            // if (lid == 0) printf("iter: %d, global_wid: %d\n", iter, global_wid);
             iter++;
-            if (iter > d_settings.max_iters) {
+            if (iter > d_settings.max_iters && lid == 0) {
                 // printf("max iters reached from bid: %d\n", bid);
                 atomicCAS((int *)&solved, 0, -1);
             }
@@ -383,29 +381,30 @@ namespace pwRRTC {
             t_parents = parents[t_tree_id];
             o_parents = parents[o_tree_id];
             t_radii = radii[t_tree_id];
-
+            // __syncwarp();
+            // if (lid == 0) printf("here1\n");
             if (lid == 0) {
                 halton_next(halton_states[global_wid], (float *)config[wid]);
                 Robot::scale_cfg((float *)config[wid]);
             }
+            if (__any_sync(FULL_MASK, solved != 0)) return;
             __syncwarp();
-
             // divide up the work of finding nearest neighbor among the warp
             float min_dist = FLT_MAX;
             int min_index = 0;
             float dist;
-            // int size = nodes_size[t_tree_id];
             int size = atomic_free_index[t_tree_id];
             for (int i = lid; i < size; i += 32) {
                 // while (check_partially_written(&t_nodes[i * dim], dim)) {};
                 if (check_partially_written(&t_nodes[i * dim], dim)) break;
-                dist = device_utils::sq_l2_dist((float *)&t_nodes[i * dim], (float *) config, dim);
+                dist = device_utils::sq_l2_dist((float *)&t_nodes[i * dim], (float *) config[wid], dim);
                 if (dist < min_dist) {
                     min_dist = dist;
                     min_index = i;
                 }
             }
-            
+            __syncwarp();
+            // if (lid == 0) printf("here3\n");
             for (unsigned int offset = 16; offset > 0; offset /= 2) {
                 float other_dist = __shfl_down_sync(FULL_MASK, min_dist, offset);
                 int other_index = __shfl_down_sync(FULL_MASK, min_index, offset);
@@ -419,6 +418,7 @@ namespace pwRRTC {
             min_index = __shfl_sync(FULL_MASK, min_index, 0);
             min_dist = sqrt(min_dist);
 
+            if (__any_sync(FULL_MASK, solved != 0)) return;
 
             float scale = min(1.0f, d_settings.range / min_dist);
             float *nearest_node = &t_nodes[min_index * dim];
@@ -432,25 +432,17 @@ namespace pwRRTC {
             }
             __syncwarp();
 
-            // if (solved != 0) return;
-            
+            if (__any_sync(FULL_MASK, solved != 0)) return;
+
             /* validate_edges */
             float interp_cfg[dim];
             for (int i = 0; i < dim; i++) {
                 interp_cfg[i] = nearest_node[i] + ((lid + 1) * delta[wid][i]);
             }
-            bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, lid);
-            __syncwarp();
-            for (unsigned int offset = 16; offset > 0; offset /= 2) {
-                // if (lid == 0) printf("here7\n");
-                bool other_config_in_collision = __shfl_down_sync(FULL_MASK, config_in_collision, offset);
-                // printf("other_config_in_collision: %d\n", other_config_in_collision);
-                config_in_collision = config_in_collision || other_config_in_collision;
-            }
-            // if (lid == 0) printf("config_in_collision: %d\n", config_in_collision);
-            config_in_collision = __shfl_sync(FULL_MASK, config_in_collision, 0);
+            bool local_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, threadIdx.x);
+            bool collision = __any_sync(FULL_MASK, local_collision);
             
-            if (!config_in_collision) {
+            if (!collision) {
                 /* grow tree */
                 if (lid == 0) {
                     
@@ -479,7 +471,9 @@ namespace pwRRTC {
                     t_nodes[index[wid] * dim + lid] = config[wid][lid];
                 }
                 __syncwarp();
-               
+                // if (lid == 0) printf("here5\n");
+                // if (__any_sync(FULL_MASK, solved != 0)) return;
+
                 /* connect */
                 float min_dist = FLT_MAX;
                 int min_index = 0;
@@ -501,6 +495,7 @@ namespace pwRRTC {
                         min_index = other_index;
                     }
                 }
+                __syncwarp();
                 min_dist = __shfl_sync(FULL_MASK, min_dist, 0);
                 min_index = __shfl_sync(FULL_MASK, min_index, 0);
                 min_dist = sqrt(min_dist);
@@ -510,26 +505,19 @@ namespace pwRRTC {
                     delta[wid][lid] = (o_nodes[min_index * dim + lid] - config[wid][lid]) / (float) n_extensions;
                 }
                 __syncwarp();
-
+                if (__any_sync(FULL_MASK, solved != 0)) return;
                 // validate the edge to the nearest neighbor in opposite tree, go as far as we can
                 int i_extensions = 0;
                 int extension_parent_idx = index[wid];
-                // printf("here6\n");
+                // if (lid == 0) printf("here6\n");
                 while (i_extensions < n_extensions) {
                     /* each thread checking an interpolated config along the extension vector*/
                     for (int i = 0; i < dim; i++) {
                         interp_cfg[i] = config[wid][i] + ((lid + 1) * (delta[wid][i] / 32.0f));
                     }
-                    config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, threadIdx.x);
-                    __syncwarp();
-                    for (unsigned int offset = 16; offset > 0; offset /= 2) {
-                        bool other_config_in_collision = __shfl_down_sync(FULL_MASK, config_in_collision, offset);
-                        config_in_collision = config_in_collision || other_config_in_collision;
-                    }
-                    config_in_collision = __shfl_sync(FULL_MASK, config_in_collision, 0);
-                    if (config_in_collision) break;
-                    // if (local_cc_result[0] != 0) break;
-
+                    bool local_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, threadIdx.x);
+                    bool collision = __any_sync(FULL_MASK, local_collision);
+                    if (collision) break;
                     /* add extension to tree */
                     if (lid == 0) {
                         index[wid] = atomicAdd((int *)&atomic_free_index[t_tree_id], 1);
@@ -539,20 +527,16 @@ namespace pwRRTC {
                         extension_parent_idx = index[wid];
                         // printf("in extension loop\n");
                     }
+                    // if (__any_sync(FULL_MASK, solved != 0)) return;
                     __syncwarp();
                     if (lid < dim) {
                         config[wid][lid] = config[wid][lid] + delta[wid][lid];
                         t_nodes[index[wid] * dim + lid] = config[wid][lid];
                     }
                     __syncwarp();
-                    // __threadfence_system();
-                    // if (tid == 0) {
-                    //     atomicAdd((int *)&nodes_size[t_tree_id], 1);
-                    //     // printf("added config from extension to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n", t_tree_id, index, bid, t_parents[index], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7]);
-                    //     // print_config(config, dim);
-                    // }
                     i_extensions++;
                 }
+                if (__any_sync(FULL_MASK, solved != 0)) return;
                 if (i_extensions == n_extensions) { // connected
                     if (lid == 0 && atomicCAS((int *)&solved, 0, 1) == 0) {
                         // printf("in connected\n");
@@ -567,6 +551,7 @@ namespace pwRRTC {
                         int o_path_size = 0;
                         while (t_parents[current] != current) {
                             parent = t_parents[current];
+                            while (check_partially_written(&t_nodes[current * dim], dim)) {};
                             cost += device_utils::l2_dist((float *)&t_nodes[current * dim], (float *)&t_nodes[parent * dim], dim);
                             for (int i = 0; i < dim; i++) path[t_tree_id][t_path_size * dim + i] = t_nodes[current * dim + i];
                             // printf("added to path[%d]: %f %f %f %f %f %f %f %f\n", t_tree_id, path[t_tree_id][t_path_size * dim], path[t_tree_id][t_path_size * dim + 1], path[t_tree_id][t_path_size * dim + 2], path[t_tree_id][t_path_size * dim + 3], path[t_tree_id][t_path_size * dim + 4], path[t_tree_id][t_path_size * dim + 5], path[t_tree_id][t_path_size * dim + 6], path[t_tree_id][t_path_size * dim + 7]);
@@ -581,6 +566,7 @@ namespace pwRRTC {
                         // printf("entered here2\n");
                         while(o_parents[current] != current) {
                             parent = o_parents[current];
+                            while (check_partially_written(&o_nodes[current * dim], dim)) {};
                             cost += device_utils::l2_dist((float *)&o_nodes[current * dim], (float *)&o_nodes[parent * dim], dim);
                             for (int i = 0; i < dim; i++) path[o_tree_id][o_path_size * dim + i] = o_nodes[current * dim + i];
                             // printf("added to path[%d]: %f %f %f %f %f %f %f %f\n", o_tree_id, path[o_tree_id][o_path_size * dim], path[o_tree_id][o_path_size * dim + 1], path[o_tree_id][o_path_size * dim + 2], path[o_tree_id][o_path_size * dim + 3], path[o_tree_id][o_path_size * dim + 4], path[o_tree_id][o_path_size * dim + 5], path[o_tree_id][o_path_size * dim + 6], path[o_tree_id][o_path_size * dim + 7]);
@@ -597,8 +583,11 @@ namespace pwRRTC {
                         // printf("t_tree_id %d, t_path_size: %d, o_path_size: %d\n", t_tree_id, t_path_size, o_path_size);
                         // return;
                     }
+                    // __syncwarp();
+                    // if (solved != 0) return;
                 }
-                // printf("here8\n");
+                __syncwarp();
+                // if (lid == 0) printf("here8\n");
             }
             else if (d_settings.dynamic_domain && lid == 0) {
                 volatile float *radius_ptr = &t_radii[min_index];
@@ -616,7 +605,8 @@ namespace pwRRTC {
                     desired = __float_as_int(new_radius);
                 } while (atomicCAS((int *)radius_ptr, expected, desired) != expected);
             }
-            if (solved != 0) return;
+            // if (lid == 0) printf("here9\n");
+            if (__any_sync(FULL_MASK, solved != 0)) return;
         }
     }
 
@@ -693,14 +683,14 @@ namespace pwRRTC {
         init_rng<<<numBlocks, BLOCK_SIZE>>>(rng_states, 1, num_rng_states);
 
         HaltonState<Robot> *halton_states;
-        cudaMalloc(&halton_states, settings.num_new_configs * sizeof(HaltonState<Robot>));
-        int numBlocks1 = (settings.num_new_configs + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        init_halton<Robot><<<numBlocks1, BLOCK_SIZE>>>(halton_states, rng_states);
+        int num_halton_states = settings.num_new_configs * 4;
+        cudaMalloc(&halton_states, num_halton_states * sizeof(HaltonState<Robot>));
+        int numBlocks1 = (num_halton_states + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        init_halton<Robot><<<numBlocks1, BLOCK_SIZE>>>(halton_states, rng_states, num_halton_states);
 
         // free index for next available position in tree_a and tree_b
         int h_free_index[2] = {1, num_goals};
         cudaMemcpyToSymbol(atomic_free_index, &h_free_index, sizeof(int) * 2);
-        cudaMemcpyToSymbol(nodes_size, &h_free_index, sizeof(int) * 2);
         // std::cout << "here5" << std::endl;
         // allocate for obstacles
         ppln::collision::Environment<float> *env;
@@ -752,7 +742,6 @@ namespace pwRRTC {
         
         
         cudaMemcpyFromSymbol(current_samples, atomic_free_index, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
-        // cudaMemcpyFromSymbol(current_samples, nodes_size, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
         cudaMemcpyFromSymbol(h_solved, solved, sizeof(int), 0, cudaMemcpyDeviceToHost);
         cudaMemcpyFromSymbol(&h_solved_iters, solved_iters, sizeof(int), 0, cudaMemcpyDeviceToHost);
 

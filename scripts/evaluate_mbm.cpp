@@ -217,7 +217,7 @@ void run_planning(const json &problems, pRRTC_settings &settings, std::string ru
             printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
             Configuration start = data["start"];
             std::vector<Configuration> goals = data["goals"];
-            auto result = pRRTC::solve<Robot>(start, goals, env, settings);
+            auto result = pwRRTC::solve<Robot>(start, goals, env, settings);
             for (auto& cfg: result.path) {
                 print_cfg<Robot>(cfg);
             }
@@ -256,12 +256,12 @@ int main(int argc, char* argv[]) {
     std::string run_name;
     pRRTC_settings settings;
     // 2, 128, 0.5, 1, 0
-    settings.num_new_configs = 512;
+    settings.num_new_configs = 128;
     settings.granularity = 128;
-    settings.range = 0.5;
-    settings.balance = 1;
-    settings.tree_ratio = 0.5;
-    settings.dynamic_domain = true;
+    settings.range = 1.0;
+    settings.balance = 2;
+    settings.tree_ratio = 1.0;
+    settings.dynamic_domain = false;
     settings.dd_radius = 6.0;
     settings.dd_min_radius = 1.0;
     settings.dd_alpha = 0.0001;

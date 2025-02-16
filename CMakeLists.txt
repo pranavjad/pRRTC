@@ -110,6 +110,7 @@ add_executable(evaluate_mbm
     # src/planning/pRRT.cu
     # src/planning/nRRT.cu
     src/planning/pRRTC.cu
+    src/planning/pwRRTC.cu
     # src/planning/nRRTC.cu
 )
 
@@ -138,7 +139,7 @@ add_executable(single_mbm
     # src/planning/pRRT.cu
     # src/planning/nRRT.cu
     # src/planning/nRRTC.cu
-    # src/planning/pRRTC.cu
+    src/planning/pRRTC.cu
     src/planning/pwRRTC.cu
 
 )
