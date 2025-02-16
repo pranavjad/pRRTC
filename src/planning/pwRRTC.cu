@@ -471,6 +471,9 @@ namespace pwRRTC {
                     t_nodes[index[wid] * dim + lid] = config[wid][lid];
                 }
                 __syncwarp();
+                if (lid == 0) {
+                    __threadfence();
+                }
                 // if (lid == 0) printf("here5\n");
                 // if (__any_sync(FULL_MASK, solved != 0)) return;
 
@@ -532,6 +535,10 @@ namespace pwRRTC {
                     if (lid < dim) {
                         config[wid][lid] = config[wid][lid] + delta[wid][lid];
                         t_nodes[index[wid] * dim + lid] = config[wid][lid];
+                    }
+                    __syncwarp();
+                    if (lid == 0) {
+                        __threadfence();
                     }
                     __syncwarp();
                     i_extensions++;

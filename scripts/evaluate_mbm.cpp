@@ -256,12 +256,12 @@ int main(int argc, char* argv[]) {
     std::string run_name;
     pRRTC_settings settings;
     // 2, 128, 0.5, 1, 0
-    settings.num_new_configs = 128;
+    settings.num_new_configs = 512;
     settings.granularity = 128;
-    settings.range = 1.0;
+    settings.range = 0.5;
     settings.balance = 2;
     settings.tree_ratio = 1.0;
-    settings.dynamic_domain = false;
+    settings.dynamic_domain = true;
     settings.dd_radius = 6.0;
     settings.dd_min_radius = 1.0;
     settings.dd_alpha = 0.0001;
