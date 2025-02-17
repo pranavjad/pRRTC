@@ -12,6 +12,8 @@
 #include <vamp/collision/environment.hh>
 #include <vamp/robots/fetch.hh> 
 #include <vamp/robots/panda.hh>
+#include <vamp/robots/baxter.hh>
+
 
 
 using json = nlohmann::json;
@@ -193,18 +195,19 @@ void run_planning(const json &problems, pRRTC_settings &settings, std::string ru
 
     int failed = 0;
     std::map<std::string, std::vector<PlannerResult<Robot>>> results;
-    std::vector<std::string> prob_names = {
-        "bookshelf_small",
-        "bookshelf_tall",
-        "bookshelf_thin",
-        "box",
-        "cage",
-        "table_pick",
-        "table_under_pick",
-    };
-    for (auto& name : prob_names) {
+    // std::vector<std::string> prob_names = {
+    //     "bookshelf_small",
+    //     "bookshelf_tall",
+    //     "bookshelf_thin",
+    //     "box",
+    //     "cage",
+    //     "table_pick",
+    //     "table_under_pick",
+    // };
+    
+    for (auto& [name, pset] : problems.items()) {
         std::cout << name << "\n";
-        auto pset = problems[name];
+        // auto pset = problems[name];
         
         for (int i = 0; i < pset.size(); i++) {
             std::cout << "idx: " << i << "\n";
@@ -217,7 +220,7 @@ void run_planning(const json &problems, pRRTC_settings &settings, std::string ru
             printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
             Configuration start = data["start"];
             std::vector<Configuration> goals = data["goals"];
-            auto result = pwRRTC::solve<Robot>(start, goals, env, settings);
+            auto result = pRRTC::solve<Robot>(start, goals, env, settings);
             for (auto& cfg: result.path) {
                 print_cfg<Robot>(cfg);
             }
@@ -236,7 +239,7 @@ void run_planning(const json &problems, pRRTC_settings &settings, std::string ru
                 auto cfg2 = result.path[i];
                 typename vampRobot::Configuration vamp_cfg1(cfg1);
                 typename vampRobot::Configuration vamp_cfg2(cfg2);
-                if (not vamp::planning::validate_motion<vampRobot, rake, 1>(vamp_cfg1, vamp_cfg2, vamp_env)) {
+                if (not vamp::planning::validate_motion<vampRobot, rake, 32>(vamp_cfg1, vamp_cfg2, vamp_env)) {
                     int index1 = result.path.size() - i - 1;
                     int index2 = result.path.size() - (i-1) - 1;
                     std::cout << "Vamp found collision in solution path between " << index1 << " and " << index2 << std::endl;
@@ -257,8 +260,8 @@ int main(int argc, char* argv[]) {
     pRRTC_settings settings;
     // 2, 128, 0.5, 1, 0
     settings.num_new_configs = 512;
-    settings.granularity = 128;
-    settings.range = 0.5;
+    settings.granularity = 64;
+    settings.range = 0.25;
     settings.balance = 2;
     settings.tree_ratio = 1.0;
     settings.dynamic_domain = true;
@@ -285,6 +288,8 @@ int main(int argc, char* argv[]) {
         run_planning<robots::Fetch, vamp::robots::Fetch>(problems, settings, run_name, robot_name);
     } else if (robot_name == "panda") {
         run_planning<robots::Panda, vamp::robots::Panda>(problems, settings, run_name, robot_name);
+    } else if (robot_name == "baxter") {
+        run_planning<robots::Baxter, vamp::robots::Baxter>(problems, settings, run_name, robot_name);
     } else {
         std::cerr << "Unsupported robot type: " << robot_name << "\n";
         return 1;

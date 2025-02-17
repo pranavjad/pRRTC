@@ -12,7 +12,7 @@
 #include <vamp/collision/environment.hh>
 #include <vamp/robots/fetch.hh> 
 #include <vamp/robots/panda.hh>
-
+#include <vamp/robots/baxter.hh>
 
 
 using json = nlohmann::json;
@@ -163,7 +163,7 @@ void run_planner(json &data, Environment<float> &env, struct pRRTC_settings &set
     using Configuration = typename Robot::Configuration;
     Configuration start = data["start"];
     std::vector<Configuration> goals = data["goals"];
-    auto result = pwRRTC::solve<Robot>(start, goals, env, settings);
+    auto result = pRRTC::solve<Robot>(start, goals, env, settings);
     for (auto& cfg: result.path) {
         print_cfg<Robot>(cfg);
     }
@@ -171,7 +171,7 @@ void run_planner(json &data, Environment<float> &env, struct pRRTC_settings &set
         std::cout << "failed!" << std::endl;
     }
     std::cout << "cost: " << result.cost << "\n";
-    std::cout << "time (us): " << result.kernel_ns/1000 << "\n";
+    std::cout << "time (us): " << result.kernel_ns/1000.0f << "\n";
 
     // Validate the result
     for (auto i = 1ul; i < result.path.size(); i++) {
@@ -219,7 +219,7 @@ int main(int argc, char* argv[]) {
     struct pRRTC_settings settings;
     settings.num_new_configs = 512;
     settings.max_iters = 1000000;
-    settings.granularity = 128;
+    settings.granularity = 64;
     settings.range = 0.5;
     settings.balance = 2;
     settings.tree_ratio = 1.0;
@@ -231,5 +231,10 @@ int main(int argc, char* argv[]) {
         run_planner<robots::Fetch, vamp::robots::Fetch>(data, env, settings, vamp_env);
     } else if (robot_name == "panda") {
         run_planner<robots::Panda, vamp::robots::Panda>(data, env, settings, vamp_env);
+    } else if (robot_name == "baxter") {
+        run_planner<robots::Baxter, vamp::robots::Baxter>(data, env, settings, vamp_env);
+    } else {
+        std::cerr << "Unsupported robot type: " << robot_name << "\n";
+        return 1;
     }
 }

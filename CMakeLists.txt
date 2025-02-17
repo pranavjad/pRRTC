@@ -84,6 +84,8 @@ endif()
 ### Uncomment this line to see ptx compiler info, number of registers used, etc.
 # set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas -v")
 # set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-g -G")  # enable cuda-gdb
+set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo")  # enable line info in ncu ui
+
 
 ### rrt test script
 # add_executable(test_rrt
@@ -110,7 +112,7 @@ add_executable(evaluate_mbm
     # src/planning/pRRT.cu
     # src/planning/nRRT.cu
     src/planning/pRRTC.cu
-    src/planning/pwRRTC.cu
+    # src/planning/pwRRTC.cu
     # src/planning/nRRTC.cu
 )
 
@@ -140,7 +142,7 @@ add_executable(single_mbm
     # src/planning/nRRT.cu
     # src/planning/nRRTC.cu
     src/planning/pRRTC.cu
-    src/planning/pwRRTC.cu
+    # src/planning/pwRRTC.cu
 
 )
 

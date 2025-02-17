@@ -28,7 +28,8 @@ namespace pRRTC {
     __device__ volatile int solved = 0;
     __device__ volatile int atomic_free_index[2]; // separate for tree_a and tree_b
     __device__ volatile int nodes_size[2];
-    __device__ float path[2][500]; // solution path segments for tree_a, and tree_b
+    constexpr int MAX_PATH_SIZE = 5000;
+    __device__ float path[2][MAX_PATH_SIZE]; // solution path segments for tree_a, and tree_b
     __device__ int path_size[2] = {0, 0};
     __device__ float cost = 0.0;
     __device__ int reached_goal_idx = 0;
@@ -294,7 +295,7 @@ namespace pRRTC {
         path_size[1] = 0;
         
         for (int tree = 0; tree < 2; tree++) {
-            for (int i = 0; i < 500; i++) {
+            for (int i = 0; i < MAX_PATH_SIZE; i++) {
                 path[tree][i] = 0.0f;
             }
         }
@@ -583,7 +584,7 @@ namespace pRRTC {
                     t_nodes[index * dim + tid] = config[tid];
                 }
                 __syncthreads();
-                // __threadfence_system();
+                // if (tid == 0) __threadfence_system();
             }
             // grid.sync();
             if (edge_good) {
@@ -673,7 +674,7 @@ namespace pRRTC {
                         t_nodes[index * dim + tid] = config[tid];
                     }
                     __syncthreads();
-                    // __threadfence_system();
+                    // if (tid == 0) __threadfence_system();
                     // if (tid == 0) {
                     //     atomicAdd((int *)&nodes_size[t_tree_id], 1);
                     //     // printf("added config from extension to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n", t_tree_id, index, bid, t_parents[index], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7]);
@@ -731,7 +732,7 @@ namespace pRRTC {
                 }
                 // printf("here8\n");
             }
-            else if (d_settings.dynamic_domain && tid == 0) {         
+            else if (d_settings.dynamic_domain && tid == 0) {      
                 volatile float *radius_ptr = &radii[t_tree_id][sindex[0]];
                 float old_radius, new_radius;
                 int expected, desired;
@@ -803,6 +804,7 @@ namespace pRRTC {
         std::vector<float> nodes_init(settings.max_samples * dim, UNWRITTEN_VAL);
         cudaMemcpy((void *)nodes[0], nodes_init.data(), config_size * settings.max_samples, cudaMemcpyHostToDevice);
         cudaMemcpy((void *)nodes[1], nodes_init.data(), config_size * settings.max_samples, cudaMemcpyHostToDevice);
+        
         // add start to tree_a and goals to tree_b
         cudaMemcpy((void *)nodes[0], start.data(), config_size, cudaMemcpyHostToDevice);
         cudaMemcpy((void *)parents[0], &start_index, sizeof(int), cudaMemcpyHostToDevice);
@@ -847,6 +849,7 @@ namespace pRRTC {
         cudaMallocHost(&h_solved, sizeof(int));  // Pinned memory
         *h_solved = -1;
 
+        
 
         auto kernel_start_time = std::chrono::steady_clock::now();
         rrtc<Robot><<<settings.num_new_configs, settings.granularity>>> (
@@ -859,6 +862,7 @@ namespace pRRTC {
         );
         cudaDeviceSynchronize();
         res.kernel_ns = get_elapsed_nanoseconds(kernel_start_time);
+
         cudaCheckError(cudaGetLastError());
 
         // void* kernelArgs[] = {
@@ -900,11 +904,11 @@ namespace pRRTC {
         if (*h_solved) {
             std::cout << "solved!\n";
             int h_path_size[2];
-            float h_paths[2][500];
+            float h_paths[2][MAX_PATH_SIZE];
             float h_cost;
             int h_reached_goal_idx;
             cudaMemcpyFromSymbol(h_path_size, path_size, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
-            cudaMemcpyFromSymbol(h_paths, path, sizeof(float) * 2 * 500, 0, cudaMemcpyDeviceToHost);
+            cudaMemcpyFromSymbol(h_paths, path, sizeof(float) * 2 * MAX_PATH_SIZE, 0, cudaMemcpyDeviceToHost);
             cudaMemcpyFromSymbol(&h_cost, cost, sizeof(float), 0, cudaMemcpyDeviceToHost);
             cudaMemcpyFromSymbol(&h_reached_goal_idx, reached_goal_idx, sizeof(int), 0, cudaMemcpyDeviceToHost);
             cudaCheckError(cudaGetLastError());
@@ -953,4 +957,6 @@ namespace pRRTC {
     template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PlannerResult<typename ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
+    template PlannerResult<typename ppln::robots::Baxter> solve<ppln::robots::Baxter>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
+
 }

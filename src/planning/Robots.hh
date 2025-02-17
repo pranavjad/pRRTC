@@ -119,6 +119,74 @@ namespace ppln::robots {
         }
     };
 
+    struct Baxter
+    {
+        static constexpr auto name = "baxter";
+        static constexpr auto dimension = 14;
+        using Configuration = std::array<float, dimension>;
+
+        __device__ static constexpr float get_s_m(int i) {
+            constexpr float values[] = {
+                3.40335987756,
+                3.194,
+                6.10835987756,
+                2.6679999999999997,
+                6.118,
+                3.66479632679,
+                6.118,
+                3.40335987756,
+                3.194,
+                6.10835987756,
+                2.6679999999999997,
+                6.118,
+                3.66479632679,
+                6.118
+            };
+            return values[i];
+        }
+        
+        __device__ static constexpr float get_s_a(int i) {
+            constexpr float values[] = {
+                -1.70167993878,
+                -2.147,
+                -3.05417993878,
+                -0.05,
+                -3.059,
+                -1.57079632679,
+                -3.059,
+                -1.70167993878,
+                -2.147,
+                -3.05417993878,
+                -0.05,
+                -3.059,
+                -1.57079632679,
+                -3.059
+            };
+            return values[i];
+        }
+
+        inline static void print_robot_config(Configuration &cfg) {
+            for (int i = 0; i < dimension; i++) {
+                std::cout << cfg[i] << ' ';
+            }
+            std::cout << '\n';
+        };
+        
+        template<size_t I = 0>
+        __device__ __forceinline__ static void scale_cfg_impl(float *q)
+        {
+            if constexpr (I < dimension) {
+                q[I] = q[I] * get_s_m(I) + get_s_a(I);
+                scale_cfg_impl<I + 1>(q);
+            }
+        }
+
+        __device__ __forceinline__ static void scale_cfg(float *q)
+        {
+            scale_cfg_impl(q);
+        }
+    };
+
     struct Sphere
     {
         static constexpr auto name = "sphere";

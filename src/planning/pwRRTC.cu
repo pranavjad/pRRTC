@@ -26,7 +26,8 @@ namespace pwRRTC {
     using namespace ppln;
     __device__ volatile int solved = 0;
     __device__ volatile int atomic_free_index[2]; // separate for tree_a and tree_b
-    __device__ float path[2][500]; // solution path segments for tree_a, and tree_b
+    constexpr int MAX_PATH_SIZE = 5000;
+    __device__ float path[2][MAX_PATH_SIZE]; // solution path segments for tree_a, and tree_b
     __device__ int path_size[2] = {0, 0};
     __device__ float cost = 0.0;
     __device__ int reached_goal_idx = 0;
@@ -280,7 +281,7 @@ namespace pwRRTC {
         path_size[1] = 0;
         
         for (int tree = 0; tree < 2; tree++) {
-            for (int i = 0; i < 500; i++) {
+            for (int i = 0; i < MAX_PATH_SIZE; i++) {
                 path[tree][i] = 0.0f;
             }
         }
@@ -338,7 +339,8 @@ namespace pwRRTC {
         float *t_radii = radii[t_tree_id];
 
         while (true) {
-            if (atomicAdd((int *)&solved, 0) != 0) return;
+            // if (atomicAdd((int *)&solved, 0) != 0) return;
+
             // if (lid == 0) printf("here0\n");
             // if (solved != 0) return;
             // if (tid < dim) {
@@ -352,13 +354,13 @@ namespace pwRRTC {
             }
 
             if (d_settings.balance == 0 || iter == 1) {
-                t_tree_id = (bid < (d_settings.num_new_configs / 2))? 0 : 1;
+                t_tree_id = 0;
                 o_tree_id = 1 - t_tree_id;
             }
-            else if (d_settings.balance == 1 && abs(atomic_free_index[0]-atomic_free_index[1]) < 1.5 * d_settings.num_new_configs) {
+            else if (d_settings.balance == 1 && abs(atomic_free_index[0]-atomic_free_index[1]) < 1.5 * d_settings.num_new_configs * 4) {
                 float ratio = atomic_free_index[0] / (float)(atomic_free_index[0] + atomic_free_index[1]);
                 float balance_factor = 1 - ratio;
-                t_tree_id = (bid < (d_settings.num_new_configs * balance_factor))? 0 : 1;
+                t_tree_id = (global_wid < (d_settings.num_new_configs * 4 * balance_factor))? 0 : 1;
                 o_tree_id = 1 - t_tree_id;
             }
             else if (d_settings.balance == 1) {
@@ -387,7 +389,7 @@ namespace pwRRTC {
                 halton_next(halton_states[global_wid], (float *)config[wid]);
                 Robot::scale_cfg((float *)config[wid]);
             }
-            if (__any_sync(FULL_MASK, solved != 0)) return;
+            // if (__any_sync(FULL_MASK, solved != 0)) return;
             __syncwarp();
             // divide up the work of finding nearest neighbor among the warp
             float min_dist = FLT_MAX;
@@ -396,7 +398,7 @@ namespace pwRRTC {
             int size = atomic_free_index[t_tree_id];
             for (int i = lid; i < size; i += 32) {
                 // while (check_partially_written(&t_nodes[i * dim], dim)) {};
-                if (check_partially_written(&t_nodes[i * dim], dim)) break;
+                // if (check_partially_written(&t_nodes[i * dim], dim)) break;
                 dist = device_utils::sq_l2_dist((float *)&t_nodes[i * dim], (float *) config[wid], dim);
                 if (dist < min_dist) {
                     min_dist = dist;
@@ -418,7 +420,7 @@ namespace pwRRTC {
             min_index = __shfl_sync(FULL_MASK, min_index, 0);
             min_dist = sqrt(min_dist);
 
-            if (__any_sync(FULL_MASK, solved != 0)) return;
+            // if (__any_sync(FULL_MASK, solved != 0)) return;
 
             float scale = min(1.0f, d_settings.range / min_dist);
             float *nearest_node = &t_nodes[min_index * dim];
@@ -432,7 +434,7 @@ namespace pwRRTC {
             }
             __syncwarp();
 
-            if (__any_sync(FULL_MASK, solved != 0)) return;
+            // if (__any_sync(FULL_MASK, solved != 0)) return;
 
             /* validate_edges */
             float interp_cfg[dim];
@@ -474,6 +476,7 @@ namespace pwRRTC {
                 if (lid == 0) {
                     __threadfence();
                 }
+                __syncwarp();
                 // if (lid == 0) printf("here5\n");
                 // if (__any_sync(FULL_MASK, solved != 0)) return;
 
@@ -482,7 +485,8 @@ namespace pwRRTC {
                 int min_index = 0;
                 int size = atomic_free_index[o_tree_id];
                 for (unsigned int i = lid; i < size; i += 32) {
-                    if (check_partially_written(&o_nodes[i * dim], dim)) break;
+                    // while (check_partially_written(&o_nodes[i * dim], dim)) {};
+                    // if (check_partially_written(&o_nodes[i * dim], dim)) break;
                     dist = device_utils::sq_l2_dist((float *)&o_nodes[i * dim], (float *)config[wid], dim);
                     if (dist < min_dist) {
                         min_dist = dist;
@@ -508,7 +512,7 @@ namespace pwRRTC {
                     delta[wid][lid] = (o_nodes[min_index * dim + lid] - config[wid][lid]) / (float) n_extensions;
                 }
                 __syncwarp();
-                if (__any_sync(FULL_MASK, solved != 0)) return;
+                // if (__any_sync(FULL_MASK, solved != 0)) return;
                 // validate the edge to the nearest neighbor in opposite tree, go as far as we can
                 int i_extensions = 0;
                 int extension_parent_idx = index[wid];
@@ -543,7 +547,7 @@ namespace pwRRTC {
                     __syncwarp();
                     i_extensions++;
                 }
-                if (__any_sync(FULL_MASK, solved != 0)) return;
+                // if (__any_sync(FULL_MASK, solved != 0)) return;
                 if (i_extensions == n_extensions) { // connected
                     if (lid == 0 && atomicCAS((int *)&solved, 0, 1) == 0) {
                         // printf("in connected\n");
@@ -558,7 +562,7 @@ namespace pwRRTC {
                         int o_path_size = 0;
                         while (t_parents[current] != current) {
                             parent = t_parents[current];
-                            while (check_partially_written(&t_nodes[current * dim], dim)) {};
+                            // while (check_partially_written(&t_nodes[current * dim], dim)) {};
                             cost += device_utils::l2_dist((float *)&t_nodes[current * dim], (float *)&t_nodes[parent * dim], dim);
                             for (int i = 0; i < dim; i++) path[t_tree_id][t_path_size * dim + i] = t_nodes[current * dim + i];
                             // printf("added to path[%d]: %f %f %f %f %f %f %f %f\n", t_tree_id, path[t_tree_id][t_path_size * dim], path[t_tree_id][t_path_size * dim + 1], path[t_tree_id][t_path_size * dim + 2], path[t_tree_id][t_path_size * dim + 3], path[t_tree_id][t_path_size * dim + 4], path[t_tree_id][t_path_size * dim + 5], path[t_tree_id][t_path_size * dim + 6], path[t_tree_id][t_path_size * dim + 7]);
@@ -573,7 +577,7 @@ namespace pwRRTC {
                         // printf("entered here2\n");
                         while(o_parents[current] != current) {
                             parent = o_parents[current];
-                            while (check_partially_written(&o_nodes[current * dim], dim)) {};
+                            // while (check_partially_written(&o_nodes[current * dim], dim)) {};
                             cost += device_utils::l2_dist((float *)&o_nodes[current * dim], (float *)&o_nodes[parent * dim], dim);
                             for (int i = 0; i < dim; i++) path[o_tree_id][o_path_size * dim + i] = o_nodes[current * dim + i];
                             // printf("added to path[%d]: %f %f %f %f %f %f %f %f\n", o_tree_id, path[o_tree_id][o_path_size * dim], path[o_tree_id][o_path_size * dim + 1], path[o_tree_id][o_path_size * dim + 2], path[o_tree_id][o_path_size * dim + 3], path[o_tree_id][o_path_size * dim + 4], path[o_tree_id][o_path_size * dim + 5], path[o_tree_id][o_path_size * dim + 6], path[o_tree_id][o_path_size * dim + 7]);
@@ -763,11 +767,11 @@ namespace pwRRTC {
         if (*h_solved) {
             std::cout << "solved!\n";
             int h_path_size[2];
-            float h_paths[2][500];
+            float h_paths[2][MAX_PATH_SIZE];
             float h_cost;
             int h_reached_goal_idx;
             cudaMemcpyFromSymbol(h_path_size, path_size, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
-            cudaMemcpyFromSymbol(h_paths, path, sizeof(float) * 2 * 500, 0, cudaMemcpyDeviceToHost);
+            cudaMemcpyFromSymbol(h_paths, path, sizeof(float) * 2 * MAX_PATH_SIZE, 0, cudaMemcpyDeviceToHost);
             cudaMemcpyFromSymbol(&h_cost, cost, sizeof(float), 0, cudaMemcpyDeviceToHost);
             cudaMemcpyFromSymbol(&h_reached_goal_idx, reached_goal_idx, sizeof(int), 0, cudaMemcpyDeviceToHost);
             cudaCheckError(cudaGetLastError());
@@ -816,4 +820,5 @@ namespace pwRRTC {
     template PlannerResult<typename ppln::robots::Sphere> solve<ppln::robots::Sphere>(std::array<float, 3>&, std::vector<std::array<float, 3>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PlannerResult<typename ppln::robots::Panda> solve<ppln::robots::Panda>(std::array<float, 7>&, std::vector<std::array<float, 7>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
     template PlannerResult<typename ppln::robots::Fetch> solve<ppln::robots::Fetch>(std::array<float, 8>&, std::vector<std::array<float, 8>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
+    template PlannerResult<typename ppln::robots::Baxter> solve<ppln::robots::Baxter>(std::array<float, 14>&, std::vector<std::array<float, 14>>&, ppln::collision::Environment<float>&, pRRTC_settings&);
 }
