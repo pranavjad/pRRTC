@@ -17,8 +17,9 @@ struct PlannerResult {
     int path_length = 0;
     int iters = 0;
     float cost = 0.0;
-    std::size_t wall_ns = 0;
-    std::size_t kernel_ns = 0;
+    std::size_t wall_ns = 0; // wall time of the solve function
+    std::size_t kernel_ns = 0; // just kernel runtime
+    std::size_t copy_ns = 0; // time to copy start/goals to gpu and copy path and path size back
 };
 
 template <typename Robot>

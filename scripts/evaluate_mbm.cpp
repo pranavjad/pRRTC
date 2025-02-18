@@ -159,7 +159,7 @@ Environment<float> problem_dict_to_env(const json& problem, const std::string& n
 
 void print_csv_header(std::ofstream &outfile) {
     outfile << "problem_name,problem_idx,solved,vamp_valid,cost,path_length,start_tree_size,goal_tree_size,iters,wall_ns,kernel_ns,";
-    outfile << "num_new_configs,granularity,range,balance,tree_ratio,dynamic_domain,dd_alpha,dd_radius,dd_min_radius\n";
+    outfile << "copy_ns,num_new_configs,granularity,range,balance,tree_ratio,dynamic_domain,dd_alpha,dd_radius,dd_min_radius\n";
 }
 template<typename Robot>
 void print_planner_result_to_file(PlannerResult<Robot> &result, pRRTC_settings &settings, std::string problem_name, int problem_idx, std::ofstream &outfile, bool vamp_valid) {
@@ -174,6 +174,7 @@ void print_planner_result_to_file(PlannerResult<Robot> &result, pRRTC_settings &
     outfile << result.iters << ", ";
     outfile << result.wall_ns << ", ";
     outfile << result.kernel_ns << ", ";
+    outfile << result.copy_ns << ", ";
     outfile << settings.num_new_configs << ", ";
     outfile << settings.granularity << ", ";
     outfile << settings.range << ", ";
@@ -218,6 +219,7 @@ void run_planning(const json &problems, pRRTC_settings &settings, std::string ru
             auto env = problem_dict_to_env(data, name);
             auto vamp_env = problem_dict_vamp(data, name);
             printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
+            printf("num vamp spheres, capsules, cuboids: %d, %d, %d\n", vamp_env.spheres.size(), vamp_env.capsules.size(), vamp_env.cuboids.size());
             Configuration start = data["start"];
             std::vector<Configuration> goals = data["goals"];
             auto result = pRRTC::solve<Robot>(start, goals, env, settings);
@@ -239,7 +241,7 @@ void run_planning(const json &problems, pRRTC_settings &settings, std::string ru
                 auto cfg2 = result.path[i];
                 typename vampRobot::Configuration vamp_cfg1(cfg1);
                 typename vampRobot::Configuration vamp_cfg2(cfg2);
-                if (not vamp::planning::validate_motion<vampRobot, rake, 32>(vamp_cfg1, vamp_cfg2, vamp_env)) {
+                if (not vamp::planning::validate_motion<vampRobot, rake, 1>(vamp_cfg1, vamp_cfg2, vamp_env)) {
                     int index1 = result.path.size() - i - 1;
                     int index2 = result.path.size() - (i-1) - 1;
                     std::cout << "Vamp found collision in solution path between " << index1 << " and " << index2 << std::endl;
@@ -260,12 +262,12 @@ int main(int argc, char* argv[]) {
     pRRTC_settings settings;
     // 2, 128, 0.5, 1, 0
     settings.num_new_configs = 512;
-    settings.granularity = 64;
-    settings.range = 0.25;
+    settings.granularity = 32;
+    settings.range = 0.5;
     settings.balance = 2;
     settings.tree_ratio = 1.0;
     settings.dynamic_domain = true;
-    settings.dd_radius = 6.0;
+    settings.dd_radius = 4.0;
     settings.dd_min_radius = 1.0;
     settings.dd_alpha = 0.0001;
     // settings.dd_min_radius = settings.range / 2.0f;
@@ -285,10 +287,13 @@ int main(int argc, char* argv[]) {
     json all_data = json::parse(f);
     json problems = all_data["problems"];
     if (robot_name == "fetch") {
+        settings.granularity = 32;
         run_planning<robots::Fetch, vamp::robots::Fetch>(problems, settings, run_name, robot_name);
     } else if (robot_name == "panda") {
+        settings.granularity = 32;
         run_planning<robots::Panda, vamp::robots::Panda>(problems, settings, run_name, robot_name);
     } else if (robot_name == "baxter") {
+        settings.granularity = 64;
         run_planning<robots::Baxter, vamp::robots::Baxter>(problems, settings, run_name, robot_name);
     } else {
         std::cerr << "Unsupported robot type: " << robot_name << "\n";

@@ -451,8 +451,11 @@ namespace pRRTC {
             __syncthreads();
 
             for (unsigned int s = blockDim.x/2; s > 0; s >>= 1) {
+                float sdata_tid = sdata[tid];
+                float sdata_tid_s = sdata[tid + s];
+                __syncthreads();
                 if (tid < s){
-                    if (sdata[tid + s] < sdata[tid]) {
+                    if (sdata_tid_s < sdata_tid) {
                         sdata[tid] = sdata[tid + s];
                         sindex[tid] = sindex[tid + s];
                     }
@@ -615,8 +618,11 @@ namespace pRRTC {
                 __syncthreads();
                 
                 for (unsigned int s = blockDim.x/2; s > 0; s >>= 1) {
-                    if (tid < s) {
-                        if (sdata[tid + s] < sdata[tid]) {
+                    float sdata_tid = sdata[tid];
+                    float sdata_tid_s = sdata[tid + s];
+                    __syncthreads();
+                    if (tid < s){
+                        if (sdata_tid_s < sdata_tid) {
                             sdata[tid] = sdata[tid + s];
                             sindex[tid] = sindex[tid + s];
                         }
@@ -778,7 +784,6 @@ namespace pRRTC {
         // copy data to GPU
         cudaMemcpyToSymbol(d_settings, &settings, sizeof(settings));
 
-        // std::cout << "here2" << std::endl;
         int num_goals = goals.size();
         float *nodes[2];
         int *parents[2];
@@ -805,20 +810,13 @@ namespace pRRTC {
         cudaMemcpy((void *)nodes[0], nodes_init.data(), config_size * settings.max_samples, cudaMemcpyHostToDevice);
         cudaMemcpy((void *)nodes[1], nodes_init.data(), config_size * settings.max_samples, cudaMemcpyHostToDevice);
         
-        // add start to tree_a and goals to tree_b
-        cudaMemcpy((void *)nodes[0], start.data(), config_size, cudaMemcpyHostToDevice);
-        cudaMemcpy((void *)parents[0], &start_index, sizeof(int), cudaMemcpyHostToDevice);
-
-        cudaMemcpy((void *)nodes[1], goals.data(), config_size * num_goals, cudaMemcpyHostToDevice);
-        std::vector<int> parents_b_init(num_goals);
-        iota(parents_b_init.begin(), parents_b_init.end(), 0); // consecutive integers from 0 ... num_goals - 1
-        cudaMemcpy((void *)parents[1], parents_b_init.data(), sizeof(int) * num_goals, cudaMemcpyHostToDevice);
+       
 
         // initialize radii
         std::vector<float> radii_init(num_goals, FLT_MAX);
         cudaMemcpy((void *)radii[0], radii_init.data(), sizeof(float), cudaMemcpyHostToDevice);
         cudaMemcpy((void *)radii[1], radii_init.data(), sizeof(float) * num_goals, cudaMemcpyHostToDevice);
-        // std::cout << "here4" << std::endl;
+        
         // create a curandState for each thread -> holds state of RNG for each thread seperately
         // For growing the tree we will create NUM_NEW_CONFIGS threads
         curandState *rng_states;
@@ -836,12 +834,12 @@ namespace pRRTC {
         int h_free_index[2] = {1, num_goals};
         cudaMemcpyToSymbol(atomic_free_index, &h_free_index, sizeof(int) * 2);
         cudaMemcpyToSymbol(nodes_size, &h_free_index, sizeof(int) * 2);
-        // std::cout << "here5" << std::endl;
+        
         // allocate for obstacles
         ppln::collision::Environment<float> *env;
         setup_environment_on_device(env, h_environment);
-        // std::cout << "here6" << std::endl;
         cudaCheckError(cudaGetLastError());
+        
         // Setup pinned memory for signaling
         int *h_solved;
         int current_samples[2];
@@ -850,6 +848,16 @@ namespace pRRTC {
         *h_solved = -1;
 
         
+        auto copy_start_time = std::chrono::steady_clock::now();
+        // add start to tree_a and goals to tree_b
+        cudaMemcpy((void *)nodes[0], start.data(), config_size, cudaMemcpyHostToDevice);
+        cudaMemcpy((void *)parents[0], &start_index, sizeof(int), cudaMemcpyHostToDevice);
+
+        cudaMemcpy((void *)nodes[1], goals.data(), config_size * num_goals, cudaMemcpyHostToDevice);
+        std::vector<int> parents_b_init(num_goals);
+        iota(parents_b_init.begin(), parents_b_init.end(), 0); // consecutive integers from 0 ... num_goals - 1
+        cudaMemcpy((void *)parents[1], parents_b_init.data(), sizeof(int) * num_goals, cudaMemcpyHostToDevice);
+        res.copy_ns = get_elapsed_nanoseconds(copy_start_time);
 
         auto kernel_start_time = std::chrono::steady_clock::now();
         rrtc<Robot><<<settings.num_new_configs, settings.granularity>>> (
@@ -863,37 +871,16 @@ namespace pRRTC {
         cudaDeviceSynchronize();
         res.kernel_ns = get_elapsed_nanoseconds(kernel_start_time);
 
-        cudaCheckError(cudaGetLastError());
-
-        // void* kernelArgs[] = {
-        //     (void*)&d_nodes,
-        //     (void*)&d_parents,
-        //     (void*)&d_radii,
-        //     (void*)&halton_states,
-        //     (void*)&rng_states,
-        //     (void*)&env
-        // };
-        // auto kernel_start_time = std::chrono::steady_clock::now();
-        // cudaError_t err = cudaLaunchCooperativeKernel(
-        //     (void*)rrtc<Robot>,  // Kernel function
-        //     settings.num_new_configs, settings.granularity,  // Grid and block dimensions
-        //     kernelArgs,  // Kernel arguments
-        //     0  // Shared memory per block (set to 0 so the compiler and auto compute)
-        // );
-        // if (err != cudaSuccess) {
-        //     std::cerr << "CUDA Kernel launch failed: " << cudaGetErrorString(err) << "\n";
-        // }
-        // cudaDeviceSynchronize();
-        // cudaCheckError(cudaGetLastError());
-        // res.kernel_ns = get_elapsed_nanoseconds(kernel_start_time);
-        
-        
+        // get data from device
+        copy_start_time = std::chrono::steady_clock::now();
         cudaMemcpyFromSymbol(current_samples, atomic_free_index, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
-        // cudaMemcpyFromSymbol(current_samples, nodes_size, sizeof(int) * 2, 0, cudaMemcpyDeviceToHost);
         cudaMemcpyFromSymbol(h_solved, solved, sizeof(int), 0, cudaMemcpyDeviceToHost);
         cudaMemcpyFromSymbol(&h_solved_iters, solved_iters, sizeof(int), 0, cudaMemcpyDeviceToHost);
+        res.copy_ns += get_elapsed_nanoseconds(copy_start_time);
 
-        // currently, iteration count is not copied because each block may have different iteration count
+        cudaCheckError(cudaGetLastError());
+
+        
         if (*h_solved!=1) *h_solved=0;
         std::cout << "current_samples: start: " << current_samples[0] << ", goal: " << current_samples[1] << "\n";
         std::cout << "solved iters: " << h_solved_iters << "\n";
