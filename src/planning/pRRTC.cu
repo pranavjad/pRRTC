@@ -14,8 +14,6 @@
 #include <algorithm>
 #include <numeric>
 
-#include <cooperative_groups.h>
-namespace cg = cooperative_groups;
 
 
 /*
@@ -348,7 +346,6 @@ namespace pRRTC {
         ppln::collision::Environment<float> *env
     )
     {
-        cg::grid_group grid = cg::this_grid();
         static constexpr auto dim = Robot::dimension;
         const int tid = threadIdx.x;
         const int bid = blockIdx.x; // 0 ... NUM_NEW_CONFIGS
