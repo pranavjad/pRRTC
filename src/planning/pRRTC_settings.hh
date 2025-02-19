@@ -7,8 +7,8 @@ struct pRRTC_settings {
     int granularity = 64;
     float range = 0.5;
 
-    bool balance = true;
-    float tree_ratio = 0.5;
+    int balance = 1; // 0 = no balance, 1 = balance strategy 1, 2 = balance strategy 2
+    float tree_ratio = 0.5; // 0.5 for balance=1, 1.0 for balance=2
 
     bool dynamic_domain = true;
     float dd_alpha = 0.0001;
