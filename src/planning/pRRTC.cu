@@ -33,28 +33,11 @@ namespace pRRTC {
     __device__ int reached_goal_idx = 0;
     __device__ int solved_iters = 0; // value of iters in the block that solves the problem
     __constant__ pRRTC_settings d_settings;
-    __device__ int print_id = 0;
-    // constexpr int MAX_SAMPLES = 1000000;
-    // constexpr int MAX_ITERS = 1000000;
-    // constexpr int NUM_NEW_CONFIGS = 600;
+
     constexpr int MAX_GRANULARITY = 256;
-    // constexpr float RRT_RADIUS = 0.5;
-    // constexpr float TREE_RATIO = 0.5;
-    // constexpr bool balance = true;
-    // constexpr bool dynamic_domain = true;
-    // constexpr float ALPHA = 0.0001;
-    // constexpr float dd_RADIUS = 4.0;
-    // constexpr float dd_MIN_RADIUS = 1.0;
-    // constexpr int NUM_SAMPLE_RETRY = 3;
 
     constexpr int BLOCK_SIZE = 64;
     constexpr float UNWRITTEN_VAL = -9999.0f;
-
-    // Constants
-    // __constant__ float primes[16] = {
-    //     3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f, 23.f,
-    //     29.f, 31.f, 37.f, 41.f, 43.f, 47.f, 53.f, 59.f
-    // };
 
     template<typename Robot>
     struct HaltonState {
@@ -349,8 +332,6 @@ namespace pRRTC {
         static constexpr auto dim = Robot::dimension;
         const int tid = threadIdx.x;
         const int bid = blockIdx.x; // 0 ... NUM_NEW_CONFIGS
-        // const int lid = threadIdx.x%32;
-        // const int wid = threadIdx.x/32;
         __shared__ int t_tree_id; // this tree
         __shared__ int o_tree_id; // the other tree
         __shared__ float config[dim];
@@ -364,7 +345,6 @@ namespace pRRTC {
         __shared__ float scale;
         __shared__ float *nearest_node;
         __shared__ float delta[dim];
-        // __shared__ float var_cache[MAX_GRANULARITY][10];
         __shared__ int index;
         __shared__ float vec[dim];
         __shared__ unsigned int n_extensions;
@@ -373,16 +353,10 @@ namespace pRRTC {
         int iter = 0;
 
         while (true) {
-            // if (solved != 0) return;
-            // if (tid < dim) {
-            //     config[tid] = curand_uniform(&rng_states[bid * dim + tid]);
-            // }
-            // __syncthreads();
+
             if (tid == 0) {
-                // printf("iter: %d, bid: %d\n", iter, bid);
                 iter++;
                 if (iter > d_settings.max_iters) {
-                    // printf("max iters reached from bid: %d\n", bid);
                     atomicCAS((int *)&solved, 0, -1);
                 }
 
@@ -421,18 +395,11 @@ namespace pRRTC {
                 local_cc_result[0] = 0;
             }
             __syncthreads();
-            // grid.sync();
-
-            // if (solved != 0) {
-            //     // if (tid == 0) printf("Exiting because solved = %d\n, bid: %d, iter: %d", solved, bid, iter);
-            //     return;
-            // }
 
             // divide up the work of finding nearest neighbor among the threads
             float local_min_dist = FLT_MAX;
             int local_near_idx = 0;
             float dist;
-            // int size = nodes_size[t_tree_id];
             int size = atomic_free_index[t_tree_id];
             for (int i = tid; i < size; i += blockDim.x) {
                 // while (check_partially_written(&t_nodes[i * dim], dim)) {};
@@ -467,16 +434,9 @@ namespace pRRTC {
                 sdata[0] = sqrt(sdata[0]);
                 scale = min(1.0f, d_settings.range / (sdata[0]));
                 nearest_node = &t_nodes[sindex[0] * dim];
-                // for (int i = 0; i < dim; i++) {
-                //     nearest_node_copy[i] = nearest_node[i];
-                // }
-                // printf("nearest node copy: %f %f %f %f %f %f %f %f\n sindex[0]: %d, t_tree_id: %d\n",
-                //     nearest_node_copy[0], nearest_node_copy[1], nearest_node_copy[2], nearest_node_copy[3], nearest_node_copy[4], nearest_node_copy[5], nearest_node_copy[6], nearest_node_copy[7]
-                //     , sindex[0], t_tree_id
-                // );
+
                 should_skip = (d_settings.dynamic_domain && radii[t_tree_id][sindex[0]] < sdata[0]);
-                // printf("radius: %f, dist: %f\n, should_skip: %d", radii[t_tree_id][sindex[0]], sdata[0], should_skip);
-                // printf("calculate extension\n");
+
             }
             __syncthreads();
 
@@ -499,60 +459,11 @@ namespace pRRTC {
             for (int i = 0; i < dim; i++) {
                 interp_cfg[i] = nearest_node[i] + ((tid + 1) * delta[i]);
             }
-            // __shared__ bool each_thread_result[128];
             bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, tid);
-            // each_thread_result[tid] = config_in_collision;
-            // __syncthreads();
-            // bool edge_good = not blockAnyTrue(config_in_collision, tid, wid, lid);
             atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
             __syncthreads();
             bool edge_good = local_cc_result[0] == 0;
-            // bool repeated_node = (sdata[0]==0);
-            // grid.sync();
 
-            // if (tid == 0) {
-            //     // check edge with loop to verify
-            //     // printf("env debug: num_spheres: %d, num_capsules: %d, num_cylinders: %d, num_cuboids: %d\n", env->num_spheres, env->num_capsules, env->num_cylinders, env->num_cuboids);
-            //     bool debug_collision = false;
-            //     float debug_delta[dim];
-            //     float debug_interp_cfg[dim];
-            //     for (int i = 0; i < dim; i++) {
-            //         debug_delta[i] = (config[i] - nearest_node[i]) / (float) d_settings.granularity;
-            //     }
-            //     for (int i = 0; i < d_settings.granularity; i++) {
-            //         for (int j = 0; j < dim; j++) {
-            //             debug_interp_cfg[j] = nearest_node[j] + ((i + 1) * debug_delta[j]);
-            //         }
-            //         config_in_collision = not ppln::collision::fkcc<Robot>(debug_interp_cfg, env, tid);
-            //         if (config_in_collision) {
-            //             debug_collision = true;
-            //             break;
-            //         }
-            //     }
-
-            //     // bool debug_collision_2 = false;
-            //     // for (int i = 0; i < 128; i++) {
-            //     //     if (each_thread_result[i]) {
-            //     //         debug_collision_2 = true;
-            //     //         break;
-            //     //     }
-            //     // }
-
-            //     // int l_print_id = atomicAdd(&print_id, 1);
-            //     // printf("%d checked edge between: %f %f %f %f %f %f %f %f\n and %f %f %f %f %f %f %f %f. Result: %d, Debug1: %d, Debug2: %d, sindex[0]: %d\n, Nearest Node copy: %f %f %f %f %f %f %f %f\n", 
-            //     //     l_print_id,
-            //     //     nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6], nearest_node[7],
-            //     //     config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7], edge_good, !debug_collision, !debug_collision_2, sindex[0],
-            //     //     nearest_node_copy[0], nearest_node_copy[1], nearest_node_copy[2], nearest_node_copy[3], nearest_node_copy[4], nearest_node_copy[5], nearest_node_copy[6], nearest_node_copy[7]
-            //     // );
-                
-            //     // printf("%d Debug delta: %f %f %f %f %f %f %f %f\n %f %f %f %f %f %f %f %f\n",
-            //     // l_print_id,
-            //     // delta[0], delta[1], delta[2], delta[3], delta[4], delta[5], delta[6], delta[7],
-            //     // debug_delta[0], debug_delta[1], debug_delta[2], debug_delta[3], debug_delta[4], debug_delta[5], debug_delta[6], debug_delta[7]
-            //     // );
-                
-            // }
             __syncthreads();
             if (edge_good) {
                 /* grow tree */
@@ -584,18 +495,7 @@ namespace pRRTC {
                     t_nodes[index * dim + tid] = config[tid];
                 }
                 __syncthreads();
-                // if (tid == 0) __threadfence_system();
-            }
-            // grid.sync();
-            if (edge_good) {
-                // if (tid == 0) {
-                //     atomicAdd((int *)&nodes_size[t_tree_id], 1);
-                //     // printf("added config to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n parent: %f %f %f %f %f %f %f %f\n", 
-                //     //         t_tree_id, index, bid, sindex[0], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7],
-                //     //         nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6], nearest_node[7]
-                //     //     );
-                // }
-                // __syncthreads();
+
                 /* connect */
                 local_min_dist = INFINITY;
                 local_near_idx = 0;
@@ -641,13 +541,10 @@ namespace pRRTC {
                     vec[tid] = (nearest_node[tid] - config[tid]) / (float) n_extensions;
                 }
                 __syncthreads();
-            }
-            // grid.sync();
-            if (edge_good) {
+
                 // validate the edge to the nearest neighbor in opposite tree, go as far as we can
                 int i_extensions = 0;
                 int extension_parent_idx = index;
-                // printf("here6\n");
                 while (i_extensions < n_extensions) {
                     /* each thread checking an interpolated config along the extension vector*/
                     for (int i = 0; i < dim; i++) {
@@ -655,12 +552,10 @@ namespace pRRTC {
                     }
                     __syncthreads();
                     bool config_in_collision = not ppln::collision::fkcc<Robot>(interp_cfg, env, tid);
-                    // bool edge_good = not blockAnyTrue(config_in_collision, tid, wid, lid);
                     atomicOr((unsigned int *)&local_cc_result[0], config_in_collision ? 1u : 0u);
                     __syncthreads();
                     bool ext_edge_good = local_cc_result[0] == 0;
                     if (!ext_edge_good) break;
-                    // if (local_cc_result[0] != 0) break;
                     /* add extension to tree */
                     if (tid == 0) {
                         index = atomicAdd((int *)&atomic_free_index[t_tree_id], 1);
@@ -677,22 +572,11 @@ namespace pRRTC {
                         t_nodes[index * dim + tid] = config[tid];
                     }
                     __syncthreads();
-                    // if (tid == 0) __threadfence_system();
-                    // if (tid == 0) {
-                    //     atomicAdd((int *)&nodes_size[t_tree_id], 1);
-                    //     // printf("added config from extension to tree %d at index %d (bid %d, parent %d): %f %f %f %f %f %f %f %f\n", t_tree_id, index, bid, t_parents[index], config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7]);
-                    //     // print_config(config, dim);
-                    // }
                     i_extensions++;
                     __syncthreads();
                 }
                 if (i_extensions == n_extensions) { // connected
                     if (tid == 0 && atomicCAS((int *)&solved, 0, 1) == 0) {
-                        // printf("in connected\n");
-                        // printf("config at connection: %f %f %f %f %f %f %f %f\n nearest node: %f %f %f %f %f %f %f %f\n", 
-                        //     config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7],
-                        //     nearest_node[0], nearest_node[1], nearest_node[2], nearest_node[3], nearest_node[4], nearest_node[5], nearest_node[6], nearest_node[7]
-                        // );
                         // trace back to the start and goal.
                         int current = index;
                         int parent;
@@ -727,13 +611,9 @@ namespace pRRTC {
                         path_size[t_tree_id] = t_path_size;
                         path_size[o_tree_id] = o_path_size;
                         solved_iters = iter;
-                        
-                        // printf("t_tree_id %d, t_path_size: %d, o_path_size: %d\n", t_tree_id, t_path_size, o_path_size);
-                        // return;
                     }
                     __syncthreads();
                 }
-                // printf("here8\n");
             }
             else if (d_settings.dynamic_domain && tid == 0) {      
                 volatile float *radius_ptr = &radii[t_tree_id][sindex[0]];
@@ -752,7 +632,6 @@ namespace pRRTC {
                 } while (atomicCAS((int *)radius_ptr, expected, desired) != expected);
             }
             __syncthreads();
-            // grid.sync();
             if (solved != 0) return;
         }
     }
