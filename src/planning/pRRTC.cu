@@ -494,6 +494,7 @@ namespace pRRTC {
                 if (tid < dim) {
                     t_nodes[index * dim + tid] = config[tid];
                 }
+                if (tid == 0) __threadfence();
                 __syncthreads();
 
                 /* connect */
@@ -571,6 +572,7 @@ namespace pRRTC {
                         config[tid] = config[tid] + vec[tid];
                         t_nodes[index * dim + tid] = config[tid];
                     }
+                    if (tid == 0) __threadfence();
                     __syncthreads();
                     i_extensions++;
                     __syncthreads();

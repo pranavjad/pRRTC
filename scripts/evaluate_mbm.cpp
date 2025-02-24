@@ -262,7 +262,7 @@ int main(int argc, char* argv[]) {
     pRRTC_settings settings;
     settings.num_new_configs = 512;
     settings.granularity = 32;
-    settings.range = 1.0;
+    settings.range = 0.5;
     settings.balance = 2;
     settings.tree_ratio = 1.0;
     settings.dynamic_domain = true;
@@ -285,13 +285,13 @@ int main(int argc, char* argv[]) {
     json all_data = json::parse(f);
     json problems = all_data["problems"];
     if (robot_name == "fetch") {
-        settings.granularity = 32;
+        // settings.granularity = 32;
         run_planning<robots::Fetch, vamp::robots::Fetch>(problems, settings, run_name, robot_name);
     } else if (robot_name == "panda") {
-        settings.granularity = 32;
+        // settings.granularity = 32;
         run_planning<robots::Panda, vamp::robots::Panda>(problems, settings, run_name, robot_name);
     } else if (robot_name == "baxter") {
-        settings.granularity = 64;
+        // settings.granularity = 64;
         run_planning<robots::Baxter, vamp::robots::Baxter>(problems, settings, run_name, robot_name);
     } else {
         std::cerr << "Unsupported robot type: " << robot_name << "\n";
