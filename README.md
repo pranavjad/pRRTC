@@ -1,10 +1,10 @@
-# Paraplan
+# pRRTC
 
-Implements a parallelized RRT with parallelized collision checking.
+Code for pRRTC: GPU-Parallel RRT-Connect for Fast,
+Consistent, and Low-Cost Motion Planning.
 
-To build and run benchmark:
 ```
 cmake -B build
 cmake --build build
-build/evaluate_mbm
+build/evaluate_mbm panda test
 ```
