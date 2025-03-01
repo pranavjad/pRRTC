@@ -14,7 +14,7 @@ project (
     LANGUAGES CXX CUDA
 )
 
-set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+set(CMAKE_CUDA_SEPARABLE_COMPILATION OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -82,9 +82,9 @@ endif()
 
 
 ### Uncomment this line to see ptx compiler info, number of registers used, etc.
-# set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas -v")
+set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-Xptxas -v")
 # set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-g -G")  # enable cuda-gdb
-set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo")  # enable line info in ncu ui
+# set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo")  # enable line info in ncu ui
 
 
 ### rrt test script
@@ -200,3 +200,21 @@ target_compile_options(single_mbm PRIVATE
 #     nlohmann_json::nlohmann_json
 #     Eigen3::Eigen
 # )
+
+### cc_throughput script
+add_executable(cc_throughput
+    scripts/cc_throughput.cpp
+    src/planning/cc_throughput.cu
+)
+
+target_include_directories(cc_throughput
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(cc_throughput
+    PRIVATE
+    # template_lib
+    nlohmann_json::nlohmann_json
+    Eigen3::Eigen
+)

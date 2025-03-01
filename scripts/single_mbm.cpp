@@ -219,7 +219,7 @@ int main(int argc, char* argv[]) {
     struct pRRTC_settings settings;
     settings.num_new_configs = 512;
     settings.max_iters = 1000000;
-    settings.granularity = 64;
+    settings.granularity = 32;
     settings.range = 0.5;
     settings.balance = 2;
     settings.tree_ratio = 1.0;
