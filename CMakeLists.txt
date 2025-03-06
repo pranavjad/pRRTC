@@ -78,33 +78,12 @@ endif()
 ### end vamp compiler options
 
 
-
-
-
-### Uncomment this line to see ptx compiler info, number of registers used, etc.
 # set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas -v")
 # set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-g -G")  # enable cuda-gdb
-set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo")  # enable line info in ncu ui
+# set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo")  # enable line info in ncu ui
 
 
-### rrt test script
-# add_executable(test_rrt
-#     test_rrt.cpp
-#     RRT_interleaved.cu
-#     pRRT.cu
-# )
 
-# target_include_directories(test_rrt
-#     PRIVATE
-#     ${CMAKE_CURRENT_SOURCE_DIR}
-# )
-
-# target_link_libraries(test_rrt
-#     PRIVATE
-#     # template_lib
-#     nlohmann_json::nlohmann_json
-#     Eigen3::Eigen
-# )
 
 ### motion benchmark script
 add_executable(evaluate_mbm
@@ -165,24 +144,25 @@ target_compile_options(single_mbm PRIVATE
     -Wno-c++11-narrowing
 )
 
-
-
-### generate_data
-# add_executable(generate_data
-#     scripts/generate_data.cpp
-#     src/planning/pRRTC.cu
+### rrt test script
+# add_executable(test_rrt
+#     test_rrt.cpp
+#     RRT_interleaved.cu
+#     pRRT.cu
 # )
 
-# target_include_directories(generate_data
+# target_include_directories(test_rrt
 #     PRIVATE
 #     ${CMAKE_CURRENT_SOURCE_DIR}
 # )
 
-# target_link_libraries(generate_data
+# target_link_libraries(test_rrt
 #     PRIVATE
+#     # template_lib
 #     nlohmann_json::nlohmann_json
 #     Eigen3::Eigen
 # )
+
 
 ### check_edge script
 # add_executable(edge_check
