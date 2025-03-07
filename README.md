@@ -9,15 +9,29 @@ We introduce pRRTC, a GPU-based, parallel RRT-Connect-based algorithm. Our appro
 
 Our empirical evaluations show that pRRTC achieves up to 6x average speedup on constrained reaching tasks at high collision checking resolution. pRRTC also demonstrates a 5x reduction in solution time variance and 1.5x improvement in initial path costs compared to state-of-the-art motion planners in complex environments.
 
-## Supported Robots and Dataset
-pRRTC currently supports 7-DoF Franka Emika Panda, 8- DoF Fetch, and 14-DoF Rethink Robotics Baxter. The repository includes the [MotionBenchMaker](https://github.com/KavrakiLab/motion_bench_maker) dataset corresponding to the three robots.
+## Supported Robots and Problem Datasets
+pRRTC currently supports 7-DoF Franka Emika Panda, 8- DoF Fetch, and 14-DoF Rethink Robotics Baxter. The repository includes the [MotionBenchMaker](https://github.com/KavrakiLab/motion_bench_maker) datasets corresponding to the three robots.
 
-## Building
-
+## Building Code
+To build pRRTC, follow the instructions below
 ```
 git clone git@github.com:CoMMALab/pRRTC.git
 cmake -B build
 cmake --build build
 ```
+
+## Running Code
+The repository comes with two scripts: evaluate_mbm.cpp and single_mbm.cpp. The file evaluate_mbm.cpp allows users to benchmark pRRTC's performance using Panda, Fetch, or Baxter on the entire [MotionBenchMaker]((https://github.com/KavrakiLab/motion_bench_maker) problemset. The script single_mbm.cpp also lets users to benchmark the performance of Panda, Fetch, or Baxter on [MotionBenchMaker]((https://github.com/KavrakiLab/motion_bench_maker), but instead of running the entire problemset the script enables users to select only one problem for benchmarking.
+
+To run evaluate_mbm.cpp:
+```
+build/evaluate_mbm <robot> <experiment name>
+```
+
+To run single_mbm.cpp:
+```
+build/single_mbm <robot> <MBM problem name> <MBM problem index>
+```
+
 
 
