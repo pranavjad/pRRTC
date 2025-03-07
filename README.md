@@ -9,10 +9,10 @@ We introduce pRRTC, a GPU-based, parallel RRT-Connect-based algorithm. Our appro
 
 Our empirical evaluations show that pRRTC achieves up to 6x average speedup on constrained reaching tasks at high collision checking resolution. pRRTC also demonstrates a 5x reduction in solution time variance and 1.5x improvement in initial path costs compared to state-of-the-art motion planners in complex environments.
 
-
+## Building the Code
 
 ```
+git clone git@github.com:CoMMALab/pRRTC.git
 cmake -B build
 cmake --build build
-build/evaluate_mbm panda test
 ```
