@@ -1,4 +1,4 @@
-# pRRTC
+# pRRTC: GPU-Parallel RRT-Connect
 
 This repository holds the code for paper "pRRTC: GPU-Parallel RRT-Connect for Fast, Consistent, and Low-Cost Motion Planning."
 
