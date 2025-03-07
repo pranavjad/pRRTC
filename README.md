@@ -23,7 +23,7 @@ cmake --build build
 ## Running Code
 The repository comes with two benchmarking script: evaluate_mbm.cpp and single_mbm.cpp.
 
-evaluate_mbm.cpp allows users to benchmark pRRTC's performance using Panda, Fetch, or Baxter on the entire [MotionBenchMaker](https://github.com/KavrakiLab/motion_bench_maker). To run evaluate_mbm.cpp:
+evaluate_mbm.cpp allows users to benchmark pRRTC's performance using Panda, Fetch, or Baxter on the entire [MotionBenchMaker](https://github.com/KavrakiLab/motion_bench_maker) dataset. To run evaluate_mbm.cpp:
 ```
 build/evaluate_mbm <robot> <experiment name>
 ```
