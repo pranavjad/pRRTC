@@ -9,8 +9,8 @@ We introduce pRRTC, a GPU-based, parallel RRT-Connect-based algorithm. Our appro
 
 Our empirical evaluations show that pRRTC achieves up to 6x average speedup on constrained reaching tasks at high collision checking resolution. pRRTC also demonstrates a 5x reduction in solution time variance and 1.5x improvement in initial path costs compared to state-of-the-art motion planners in complex environments.
 
-## Supported Robots and Problem Datasets
-pRRTC currently supports 7-DoF Franka Emika Panda, 8-DoF Fetch, and 14-DoF Rethink Robotics Baxter. The repository includes the [MotionBenchMaker](https://github.com/KavrakiLab/motion_bench_maker) datasets corresponding to the three robots.
+## Supported Robots
+pRRTC currently supports 7-DoF Franka Emika Panda, 8-DoF Fetch, and 14-DoF Rethink Robotics Baxter.
 
 ## Building Code
 To build pRRTC, follow the instructions below
