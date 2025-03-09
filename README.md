@@ -33,6 +33,20 @@ single_mbm.cpp allows users to benchmark pRRTC's performance using Panda, Fetch,
 build/single_mbm <robot> <MBM problem name> <MBM problem index>
 ```
 
+## Planner Configuration
+pRRTC has the following parameters which can be modified in the benchmarking scripts:
+- max_samples: maximum numbers of total samples in trees
+- max_iters: maximum number of planning iterations
+- num_new_configs: amount of new samples generated per iteration
+- range: maximum RRT-Connect extension range
+- granularity: number of discretized motions along an edge during collision checking
+- balance: whether to enable tree balancing, 0 for no balancing, 1 for distributed balancing where each iteration may sample for one or two trees, 2 for single-sided balancing where each iteration all samples are generated for one tree only
+- tree_ratio: the threshold for distinguishing which tree is smaller in size, if balance set to 1, then set tree_ratio to 0.5; if balance set to 2, then set tree_ratio to 1
+- dynamic_domain: whether to enable [dynamic domain sampling](https://ieeexplore.ieee.org/abstract/document/1570709), 0 for false and 1 for true
+- dd_alpha: the extent to which each radius is modified per iteration
+- dd_radius: starting radius for dynamic domain sampling
+- dd_min_radius: minimum radius for dynamic domain sampling
+
 
 
 
