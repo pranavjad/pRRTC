@@ -35,7 +35,7 @@ build/single_mbm <robot> <MBM problem name> <MBM problem index>
 
 ## Planner Configuration
 pRRTC has the following parameters which can be modified in the benchmarking scripts:
-- <ins>**max_samples**</ins>: maximum numbers of total samples in trees
+- <ins>**max_samples**</ins>: maximum number of total samples in trees
 - <ins>**max_iters**</ins>: maximum number of planning iterations
 - <ins>**num_new_configs**</ins>: amount of new samples generated per iteration
 - <ins>**range**</ins>: maximum RRT-Connect extension range
