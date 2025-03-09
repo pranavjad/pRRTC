@@ -132,9 +132,6 @@ void run_planning(const json &problems, pRRTC_settings &settings, std::string ru
                 continue;
             }
             auto env = problem_dict_to_env(data, name);
-            auto vamp_env = problem_dict_vamp(data, name);
-            printf("num spheres, capsules, cuboids: %d, %d, %d\n", env.num_spheres, env.num_capsules, env.num_cuboids);
-            printf("num vamp spheres, capsules, cuboids: %d, %d, %d\n", vamp_env.spheres.size(), vamp_env.capsules.size(), vamp_env.cuboids.size());
             Configuration start = data["start"];
             std::vector<Configuration> goals = data["goals"];
             auto result = pRRTC::solve<Robot>(start, goals, env, settings);
