@@ -35,17 +35,17 @@ build/single_mbm <robot> <MBM problem name> <MBM problem index>
 
 ## Planner Configuration
 pRRTC has the following parameters which can be modified in the benchmarking scripts:
-- **max_samples**: maximum numbers of total samples in trees
-- **max_iters**: maximum number of planning iterations
-- **num_new_configs**: amount of new samples generated per iteration
-- **range**: maximum RRT-Connect extension range
-- **granularity**: number of discretized motions along an edge during collision checking
-- **balance**: whether to enable tree balancing, 0 for no balancing, 1 for distributed balancing where each iteration may generate samples for one or two trees, 2 for single-sided balancing where each iteration generate samples for one tree only
-- **tree_ratio**: the threshold for distinguishing which tree is smaller in size, if balance set to 1, then set tree_ratio to 0.5; if balance set to 2, then set tree_ratio to 1
-- **dynamic_domain**: whether to enable [dynamic domain sampling](https://ieeexplore.ieee.org/abstract/document/1570709), 0 for false and 1 for true
-- **dd_alpha**: extent to which each radius is enlarged or shrunk per adjustment
-- **dd_radius**: starting radius for dynamic domain sampling
-- **dd_min_radius**: minimum radius for dynamic domain sampling
+- <ins>**max_samples**</ins>: maximum numbers of total samples in trees
+- <ins>**max_iters**</ins>: maximum number of planning iterations
+- <ins>**num_new_configs**</ins>: amount of new samples generated per iteration
+- <ins>**range**</ins>: maximum RRT-Connect extension range
+- <ins>**granularity**</ins>: number of discretized motions along an edge during collision checking
+- <ins>**balance**</ins>: whether to enable tree balancing, 0 for no balancing, 1 for distributed balancing where each iteration may generate samples for one or two trees, 2 for single-sided balancing where each iteration generate samples for one tree only
+- <ins>**tree_ratio**</ins>: the threshold for distinguishing which tree is smaller in size, if balance set to 1, then set tree_ratio to 0.5; if balance set to 2, then set tree_ratio to 1
+- <ins>**dynamic_domain**</ins>: whether to enable [dynamic domain sampling](https://ieeexplore.ieee.org/abstract/document/1570709), 0 for false and 1 for true
+- <ins>**dd_alpha**</ins>: extent to which each radius is enlarged or shrunk per adjustment
+- <ins>**dd_radius**</ins>: starting radius for dynamic domain sampling
+- <ins>**dd_min_radius**</ins>: minimum radius for dynamic domain sampling
 
 
 
