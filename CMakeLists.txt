@@ -83,16 +83,10 @@ endif()
 # set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo")  # enable line info in ncu ui
 
 
-
-
 ### motion benchmark script
 add_executable(evaluate_mbm
     scripts/evaluate_mbm.cpp
-    # src/planning/pRRT.cu
-    # src/planning/nRRT.cu
     src/planning/pRRTC.cu
-    # src/planning/pwRRTC.cu
-    # src/planning/nRRTC.cu
 )
 
 target_include_directories(evaluate_mbm
@@ -117,12 +111,7 @@ target_compile_options(evaluate_mbm PRIVATE
 ### single_mbm
 add_executable(single_mbm
     scripts/single_mbm.cpp
-    # src/planning/pRRT.cu
-    # src/planning/nRRT.cu
-    # src/planning/nRRTC.cu
     src/planning/pRRTC.cu
-    # src/planning/pwRRTC.cu
-
 )
 
 target_include_directories(single_mbm
@@ -135,7 +124,6 @@ target_include_directories(single_mbm
 
 target_link_libraries(single_mbm
     PRIVATE
-    # template_lib
     nlohmann_json::nlohmann_json
     Eigen3::Eigen
 )
@@ -143,40 +131,3 @@ target_link_libraries(single_mbm
 target_compile_options(single_mbm PRIVATE
     -Wno-c++11-narrowing
 )
-
-### rrt test script
-# add_executable(test_rrt
-#     test_rrt.cpp
-#     RRT_interleaved.cu
-#     pRRT.cu
-# )
-
-# target_include_directories(test_rrt
-#     PRIVATE
-#     ${CMAKE_CURRENT_SOURCE_DIR}
-# )
-
-# target_link_libraries(test_rrt
-#     PRIVATE
-#     # template_lib
-#     nlohmann_json::nlohmann_json
-#     Eigen3::Eigen
-# )
-
-
-### check_edge script
-# add_executable(edge_check
-#     scripts/edge_check.cu
-# )
-
-# target_include_directories(edge_check
-#     PRIVATE
-#     ${CMAKE_CURRENT_SOURCE_DIR}
-# )
-
-# target_link_libraries(edge_check
-#     PRIVATE
-#     # template_lib
-#     nlohmann_json::nlohmann_json
-#     Eigen3::Eigen
-# )
