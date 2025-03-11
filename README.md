@@ -1,6 +1,8 @@
 # pRRTC: GPU-Parallel RRT-Connect
 
-This repository holds the code for IROS 2025 submission "pRRTC: GPU-Parallel RRT-Connect for Fast, Consistent, and Low-Cost Motion Planning."
+[![arXiv VAMP](https://img.shields.io/badge/arXiv-2503.06757-b31b1b.svg)](https://arxiv.org/abs/2503.06757)
+
+This repository holds the code for [IROS 2025 submission "pRRTC: GPU-Parallel RRT-Connect for Fast, Consistent, and Low-Cost Motion Planning."](https://arxiv.org/abs/2503.06757)
 
 We introduce pRRTC, a GPU-based, parallel RRT-Connect-based algorithm. Our approach has three key improvements: 
 - Concurrent sampling, expansion and connection of start and goal trees via GPU multithreading
