@@ -35,7 +35,7 @@ single_mbm.cpp allows users to benchmark pRRTC's performance using Panda, Fetch,
 build/single_mbm <robot> <MBM problem name> <MBM problem index>
 ```
 
-The problem json files are generated using the script detailed [here](https://github.com/KavrakiLab/vamp/blob/35080be604aabd4373cc7db8608297afaa446878/resources/README.md#motionbenchmaker-problems).
+The Motion Bench Maker JSON files are generated using the script detailed [here](https://github.com/KavrakiLab/vamp/blob/35080be604aabd4373cc7db8608297afaa446878/resources/README.md#motionbenchmaker-problems).
 
 ## Planner Configuration
 pRRTC has the following parameters which can be modified in the benchmarking scripts:
