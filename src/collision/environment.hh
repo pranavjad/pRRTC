@@ -35,6 +35,7 @@ namespace ppln::collision
         Environment() = default;
 
         ~Environment() {
+            std::cout << "Destroying environment" << std::endl;
             delete[] spheres;
             delete[] capsules;
             delete[] cuboids;

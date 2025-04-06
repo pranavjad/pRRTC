@@ -9,7 +9,7 @@ FetchContent_MakeAvailable(json)
 
 
 project (
-    batched_cc
+    batch_cc
     VERSION 0.0
     LANGUAGES CXX CUDA
 )
@@ -82,10 +82,12 @@ endif()
 
 
 ### Uncomment this line to see ptx compiler info, number of registers used, etc.
-set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-Xptxas -v")
-# set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-g -G")  # enable cuda-gdb
+# set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-Xptxas -v")
+# set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-G")  # enable cuda-gdb
 # set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo")  # enable line info in ncu ui
 
+# enable gdb
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g") # enable gdb for C++ as well
 
 ### rrt test script
 # add_executable(test_rrt
@@ -217,4 +219,26 @@ target_link_libraries(cc_throughput
     # template_lib
     nlohmann_json::nlohmann_json
     Eigen3::Eigen
+)
+
+add_executable(batch_cc
+    scripts/batch_cc.cpp
+    src/planning/batch_cc.cu
+)
+
+target_include_directories(batch_cc
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/vamp/src/impl
+    ${CMAKE_CURRENT_SOURCE_DIR}/build/_deps/nigh-src/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/build/_deps/pdqsort-src
+)
+target_link_libraries(batch_cc
+    PRIVATE
+    # template_lib
+    nlohmann_json::nlohmann_json
+    Eigen3::Eigen
+)
+target_compile_options(batch_cc PRIVATE
+    -Wno-c++11-narrowing
 )

@@ -108,7 +108,7 @@ namespace bench_cc {
     template <typename Robot>
     __global__ void
     __launch_bounds__(32, 4)
-    run_cc(ppln::collision::Environment<float> *env, HaltonState<Robot> *halton_states, int edges_per_block) 
+    run_cc(ppln::collision::Environment<float> *env, HaltonState<Robot> *halton_states, int edges_per_block)
     {
         // constexpr auto dim = Robot::dimension;
         // const int tid = threadIdx.x;
