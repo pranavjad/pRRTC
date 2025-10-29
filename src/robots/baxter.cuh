@@ -182,23 +182,34 @@ namespace ppln::collision {
         14
     };
     
-    __device__ __constant__ int baxter_approx_flattened_joint_to_spheres[48] = {
+    __device__ __constant__ int baxter_approx_joint_to_sphere_count[15] = {
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        9
+    };
+    
+    __device__ __constant__ int baxter_approx_flattened_joint_to_spheres[33] = {
         0,
         1,
         17,
-        -1,
         2,
-        -1,
         3,
-        -1,
         4,
-        -1,
         5,
-        -1,
         6,
-        -1,
         7,
-        -1,
         8,
         9,
         10,
@@ -208,19 +219,12 @@ namespace ppln::collision {
         14,
         15,
         16,
-        -1,
         18,
-        -1,
         19,
-        -1,
         20,
-        -1,
         21,
-        -1,
         22,
-        -1,
         23,
-        -1,
         24,
         25,
         26,
@@ -229,8 +233,7 @@ namespace ppln::collision {
         29,
         30,
         31,
-        32,
-        -1
+        32
     };
     
     __device__ __constant__ int baxter_approx_joint_types[] = {
@@ -392,7 +395,7 @@ namespace ppln::collision {
         }
         __syncthreads();
     
-        int joint_to_sphere_ind = 0;
+        int transformed_sphere_ind = 0;
     
         for (int j = 0; j < BAXTER_APPROX_JOINT_COUNT; ++j) {
             int i = baxter_approx_dfs_order[j];
@@ -426,19 +429,17 @@ namespace ppln::collision {
                 }
             }
             __syncwarp();
-            while (baxter_approx_flattened_joint_to_spheres[joint_to_sphere_ind] != -1) {
-                int sphere_ind = baxter_approx_flattened_joint_to_spheres[joint_to_sphere_ind];
-                if (col_ind < 3) {
-                    // sphere sphere_ind, robot batch_ind (BATCH_SIZE robots), coord col_ind
-                    sphere_pos_approx[sphere_ind * BATCH_SIZE * 3 + batch_ind * 3 + col_ind] = 
-                        T_base[T_memory_idx*16 + col_ind] * baxter_approx_spheres_array[sphere_ind].x +
-                        T_base[T_memory_idx*16 + col_ind + M] * baxter_approx_spheres_array[sphere_ind].y +
-                        T_base[T_memory_idx*16 + col_ind + M*2] * baxter_approx_spheres_array[sphere_ind].z +
-                        T_base[T_memory_idx*16 + col_ind + M*3];
+            int sphere_count = baxter_approx_joint_to_sphere_count[i];
+            for (int j = transformed_sphere_ind + col_ind; j < transformed_sphere_ind + sphere_count; j += 4) {
+                for (int c = 0; c < 3; c++) {
+                    sphere_pos_approx[j * BATCH_SIZE * 3 + batch_ind * 3 + c] = 
+                        T_base[T_memory_idx*16 + c] * baxter_approx_spheres_array[j].x +
+                        T_base[T_memory_idx*16 + c + M] * baxter_approx_spheres_array[j].y +
+                        T_base[T_memory_idx*16 + c + M*2] * baxter_approx_spheres_array[j].z +
+                        T_base[T_memory_idx*16 + c + M*3];
                 }
-                joint_to_sphere_ind++;
             }
-            joint_to_sphere_ind++;
+            transformed_sphere_ind += sphere_count;
             __syncthreads();
         }
     }
@@ -466,7 +467,7 @@ namespace ppln::collision {
                     sphere_1[0], sphere_1[1], sphere_1[2], baxter_approx_spheres_array[sphere_1_ind].w,
                     sphere_2[0], sphere_2[1], sphere_2[2], baxter_approx_spheres_array[j].w
                 )){
-                    atomicAdd((int*)&joint_in_collision[20*batch_ind + baxter_approx_sphere_to_joint[sphere_1_ind]], 1);
+                    atomicOr((int*)&joint_in_collision[20*batch_ind + panda_approx_sphere_to_joint[sphere_1_ind]], 2);
                     out = false;
                 }
             } 
@@ -483,7 +484,7 @@ namespace ppln::collision {
     
         for (int i = thread_ind; i < BAXTER_APPROX_SPHERE_COUNT; i += 4){
             // sphere i, robot batch_ind (32 robots)
-            if ( 
+            if (
                 sphere_environment_in_collision(
                     env,
                     sphere_pos_approx[i * BATCH_SIZE * 3 + batch_ind * 3 + 0],
@@ -492,7 +493,7 @@ namespace ppln::collision {
                     baxter_approx_spheres_array[i].w
                 )
             ) {
-                atomicAdd((int*)&joint_in_collision[20*batch_ind + baxter_approx_sphere_to_joint[i]],1);
+                atomicOr((int*)&joint_in_collision[20*batch_ind + panda_approx_sphere_to_joint[i]], 1);
                 out = false;
             } 
         }
@@ -764,31 +765,42 @@ namespace ppln::collision {
         14
     };
     
-    __device__ __constant__ int baxter_flattened_joint_to_spheres[90] = {
+    __device__ __constant__ int baxter_joint_to_sphere_count[15] = {
+        5,
+        2,
+        1,
+        3,
+        1,
+        3,
+        2,
+        23,
+        2,
+        1,
+        3,
+        1,
+        3,
+        2,
+        23
+    };
+    
+    __device__ __constant__ int baxter_flattened_joint_to_spheres[75] = {
         0,
         1,
         2,
         3,
         39,
-        -1,
         4,
         5,
-        -1,
         6,
-        -1,
         7,
         8,
         9,
-        -1,
         10,
-        -1,
         11,
         12,
         13,
-        -1,
         14,
         15,
-        -1,
         16,
         17,
         18,
@@ -812,25 +824,18 @@ namespace ppln::collision {
         36,
         37,
         38,
-        -1,
         40,
         41,
-        -1,
         42,
-        -1,
         43,
         44,
         45,
-        -1,
         46,
-        -1,
         47,
         48,
         49,
-        -1,
         50,
         51,
-        -1,
         52,
         53,
         54,
@@ -853,8 +858,7 @@ namespace ppln::collision {
         71,
         72,
         73,
-        74,
-        -1
+        74
     };
     
     __device__ __constant__ int baxter_joint_types[] = {
@@ -1057,7 +1061,7 @@ namespace ppln::collision {
         }
         __syncthreads();
     
-        int joint_to_sphere_ind = 0;
+        int transformed_sphere_ind = 0;
     
         for (int j = 0; j < BAXTER_JOINT_COUNT; ++j) {
             int i = baxter_dfs_order[j];
@@ -1091,19 +1095,17 @@ namespace ppln::collision {
                 }
             }
             __syncwarp();
-            while (baxter_flattened_joint_to_spheres[joint_to_sphere_ind] != -1) {
-                int sphere_ind = baxter_flattened_joint_to_spheres[joint_to_sphere_ind];
-                if (col_ind < 3) {
-                    // sphere sphere_ind, robot batch_ind (BATCH_SIZE robots), coord col_ind
-                    sphere_pos[sphere_ind * BATCH_SIZE * 3 + batch_ind * 3 + col_ind] = 
-                        T_base[T_memory_idx*16 + col_ind] * baxter_spheres_array[sphere_ind].x +
-                        T_base[T_memory_idx*16 + col_ind + M] * baxter_spheres_array[sphere_ind].y +
-                        T_base[T_memory_idx*16 + col_ind + M*2] * baxter_spheres_array[sphere_ind].z +
-                        T_base[T_memory_idx*16 + col_ind + M*3];
+            int sphere_count = baxter_joint_to_sphere_count[i];
+            for (int j = transformed_sphere_ind + col_ind; j < transformed_sphere_ind + sphere_count; j += 4) {
+                for (int c = 0; c < 3; c++) {
+                    sphere_pos[j * BATCH_SIZE * 3 + batch_ind * 3 + c] = 
+                        T_base[T_memory_idx*16 + c] * baxter_spheres_array[j].x +
+                        T_base[T_memory_idx*16 + c + M] * baxter_spheres_array[j].y +
+                        T_base[T_memory_idx*16 + c + M*2] * baxter_spheres_array[j].z +
+                        T_base[T_memory_idx*16 + c + M*3];
                 }
-                joint_to_sphere_ind++;
             }
-            joint_to_sphere_ind++;
+            transformed_sphere_ind += sphere_count;
             __syncthreads();
         }
     }
@@ -1118,7 +1120,7 @@ namespace ppln::collision {
         for (int i = thread_ind; i < BAXTER_SELF_CC_RANGE_COUNT; i += 4) {
             if (warp_any_active_mask(has_collision)) return false;
             int sphere_1_ind = baxter_self_cc_ranges[i][0];
-            if (joint_in_collision[20*batch_ind + baxter_sphere_to_joint[sphere_1_ind]] == 0) continue;
+            if (!(joint_in_collision[20*batch_ind + baxter_sphere_to_joint[sphere_1_ind]] & 2)) continue;
             float sphere_1[3] = {
                 sphere_pos[sphere_1_ind * BATCH_SIZE * 3 + batch_ind * 3 + 0],
                 sphere_pos[sphere_1_ind * BATCH_SIZE * 3 + batch_ind * 3 + 1],
@@ -1152,7 +1154,7 @@ namespace ppln::collision {
     
         for (int i = thread_ind; i < BAXTER_SPHERE_COUNT-BAXTER_SPHERE_COUNT%4; i += 4){
             // sphere i, robot batch_ind (16 robots)
-            if (joint_in_collision[20*batch_ind + baxter_sphere_to_joint[i]] > 0 && 
+            if ( (joint_in_collision[20*batch_ind + baxter_sphere_to_joint[i]] & 1) && 
                 sphere_environment_in_collision(
                     env,
                     sphere_pos[i * BATCH_SIZE * 3 + batch_ind * 3 + 0],
@@ -1161,13 +1163,12 @@ namespace ppln::collision {
                     baxter_spheres_array[i].w
                 )
             ) {
-                //return false;
                 has_collision=true;
             } 
             if (warp_any_full_mask(has_collision)) return false;
         }
         int i=BAXTER_SPHERE_COUNT-1-thread_ind;
-        if (joint_in_collision[20*batch_ind + baxter_sphere_to_joint[i]] > 0 && 
+        if ( (joint_in_collision[20*batch_ind + baxter_sphere_to_joint[i]] & 1) && 
             sphere_environment_in_collision(
                 env,
                 sphere_pos[i * BATCH_SIZE * 3 + batch_ind * 3 + 0],
