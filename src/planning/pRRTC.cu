@@ -351,8 +351,8 @@ namespace pRRTC {
 
         while (true) {
             if (tid == 0) {
-                printf("iter: %d\n", iter);
-                printf("tree size: %d\n", atomic_free_index[0]);
+                // printf("iter: %d\n", iter);
+                // printf("tree size: %d\n", atomic_free_index[0]);
                 iter++;
                 if (iter > d_settings.max_iters) {
                     atomicCAS((int *)&solved, 0, -1);

@@ -317,7 +317,7 @@ namespace ppln::collision {
                     sphere_1[0], sphere_1[1], sphere_1[2], fetch_approx_spheres_array[sphere_1_ind].w,
                     sphere_2[0], sphere_2[1], sphere_2[2], fetch_approx_spheres_array[j].w
                 )){
-                    atomicOr((int*)&joint_in_collision[20*batch_ind + panda_approx_sphere_to_joint[sphere_1_ind]], 2);
+                    atomicOr((int*)&joint_in_collision[20*batch_ind + fetch_approx_sphere_to_joint[sphere_1_ind]], 2);
                     out = false;
                 }
             } 
@@ -334,7 +334,7 @@ namespace ppln::collision {
     
         for (int i = thread_ind; i < FETCH_APPROX_SPHERE_COUNT; i += 4){
             // sphere i, robot batch_ind (32 robots)
-            if (
+            if (i > 0 &&
                 sphere_environment_in_collision(
                     env,
                     sphere_pos_approx[i * BATCH_SIZE * 3 + batch_ind * 3 + 0],
@@ -343,7 +343,7 @@ namespace ppln::collision {
                     fetch_approx_spheres_array[i].w
                 )
             ) {
-                atomicOr((int*)&joint_in_collision[20*batch_ind + panda_approx_sphere_to_joint[i]], 1);
+                atomicOr((int*)&joint_in_collision[20*batch_ind + fetch_approx_sphere_to_joint[i]], 1);
                 out = false;
             } 
         }
@@ -1038,7 +1038,7 @@ namespace ppln::collision {
         bool has_collision = false;
     
         for (int i = thread_ind; i < FETCH_SELF_CC_RANGE_COUNT; i += 4) {
-            // if (warp_any_active_mask(has_collision)) return false;
+            if (warp_any_active_mask(has_collision)) return false;
             int sphere_1_ind = fetch_self_cc_ranges[i][0];
             if (!(joint_in_collision[20*batch_ind + fetch_sphere_to_joint[sphere_1_ind]] & 2)) continue;
             float sphere_1[3] = {
@@ -1074,7 +1074,7 @@ namespace ppln::collision {
     
         for (int i = thread_ind; i < FETCH_SPHERE_COUNT-FETCH_SPHERE_COUNT%4; i += 4){
             // sphere i, robot batch_ind (16 robots)
-            if ( (joint_in_collision[20*batch_ind + fetch_sphere_to_joint[i]] & 1) && 
+            if (i > 0 && (joint_in_collision[20*batch_ind + fetch_sphere_to_joint[i]] & 1) && 
                 sphere_environment_in_collision(
                     env,
                     sphere_pos[i * BATCH_SIZE * 3 + batch_ind * 3 + 0],
@@ -1085,10 +1085,10 @@ namespace ppln::collision {
             ) {
                 has_collision=true;
             } 
-            // if (warp_any_active_mask(has_collision)) return false;
+            if (warp_any_full_mask(has_collision)) return false;
         }
         int i=FETCH_SPHERE_COUNT-1-thread_ind;
-        if ( (joint_in_collision[20*batch_ind + fetch_sphere_to_joint[i]] & 1) && 
+        if (i > 0 && (joint_in_collision[20*batch_ind + fetch_sphere_to_joint[i]] & 1) && 
             sphere_environment_in_collision(
                 env,
                 sphere_pos[i * BATCH_SIZE * 3 + batch_ind * 3 + 0],
