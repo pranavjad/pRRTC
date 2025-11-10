@@ -265,7 +265,7 @@ int main(int argc, char* argv[]) {
     std::string robot_name = "baxter";
     std::string run_name;
     pRRTC_settings settings;
-    settings.num_new_configs = 512; // usually 512
+    settings.num_new_configs = 1; // usually 512
     settings.max_iters = 100000000;
     settings.granularity = 16;
     settings.range = 0.5;

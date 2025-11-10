@@ -647,7 +647,7 @@ namespace ppln::collision {
     
     
         ppln::collision::fk_approx<Robot>(config, sphere_pos, T, tid);
-        __syncwarp();
+        __syncthreads();
     
         bool approx_env_collision =
             not ppln::collision::env_collision_check_approx<Robot>(sphere_pos, link_CC, env, tid);
@@ -662,7 +662,7 @@ namespace ppln::collision {
         // if any approx collision found, proceed to detailed FK and CC
         if (approx_collision) {
             ppln::collision::fk<Robot>(config, sphere_pos, T, tid);
-            __syncwarp();
+            __syncthreads();
             if (any_approx_env_collision) {
                 bool detailed_env_collision =
                     not ppln::collision::env_collision_check<Robot>(sphere_pos, link_CC, env, tid);

@@ -472,6 +472,7 @@ namespace pRRTC {
             ppln::device_utils::fkcc_single_buffer<Robot>(interp_cfg, env, tid, sphere_pos, link_CC, T, local_cc_result);
 
             bool edge_good = local_cc_result[0] == 0;
+            __syncthreads();
             if (edge_good) {
                 // grow tree
                 if (tid == 0) {
