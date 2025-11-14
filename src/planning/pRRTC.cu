@@ -331,6 +331,8 @@ namespace pRRTC {
         __shared__ float sdata[MAX_THREADS_PER_BLOCK];
         __shared__ int sindex[MAX_THREADS_PER_BLOCK];
         __shared__ volatile unsigned int local_cc_result[1];
+        __shared__ volatile unsigned int any_approx_env_collision[1];
+        __shared__ volatile unsigned int any_approx_self_collision[1];
         __shared__ float *t_nodes;
         __shared__ float *o_nodes;
         __shared__ int *t_parents;
@@ -345,10 +347,9 @@ namespace pRRTC {
         __align__(16) __shared__ volatile float sphere_pos[6000]; // ~assuming max 120 spheres with granularity 16, each has x y z coordinates
         // __align__(16) __shared__ volatile float sphere_pos_approx[2500]; // ~assuming 50 spheres with granularity 32, each has x y z coordinates
         __align__(16) __shared__ volatile int link_CC[640]; //assuming max granularity 32, max number of links 20
-        __align__(16) __shared__ float T[16 * 1 * 16]; // 16 robots x 2x4x4 transform matrix
+        __align__(16) __shared__ float T[16 * 2 * 16]; // 16 robots x 2x4x4 transform matrix
 
         int iter = 0;
-
         while (true) {
             if (tid == 0) {
                 // printf("iter: %d\n", iter);
@@ -391,7 +392,9 @@ namespace pRRTC {
                 halton_next(halton_states[bid], (float *)config);
                 Robot::scale_cfg((float *)config);
                 local_cc_result[0] = 0;
-                // printf("config: %f %f %f %f %f %f %f\n", config[0], config[1], config[2], config[3], config[4], config[5], config[6]);
+                any_approx_env_collision[0] = 0;
+                any_approx_self_collision[0] = 0;
+                // printf("config: %f %f %f %f %f %f %f %f\n", config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7]);
                 // 14 dim config for baxter
                 // printf("config: %f %f %f %f %f %f %f %f %f %f %f %f %f %f\n", config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7], config[8], config[9], config[10], config[11], config[12], config[13]);
                 // // print out first 3 configs for testing
@@ -469,7 +472,7 @@ namespace pRRTC {
             }
             __syncthreads();
             
-            ppln::device_utils::fkcc_single_buffer<Robot>(interp_cfg, env, tid, sphere_pos, link_CC, T, local_cc_result);
+            ppln::device_utils::fkcc_single_buffer<Robot>(interp_cfg, env, tid, sphere_pos, link_CC, T, local_cc_result, any_approx_env_collision, any_approx_self_collision);
 
             bool edge_good = local_cc_result[0] == 0;
             __syncthreads();
@@ -547,6 +550,8 @@ namespace pRRTC {
                     nearest_node = &o_nodes[sindex[0] * dim];
                     n_extensions = ceil(sdata[0] / d_settings.range);
                     local_cc_result[0] = 0;
+                    any_approx_env_collision[0] = 0;
+                    any_approx_self_collision[0] = 0;
                 }
                 __syncthreads();
 
@@ -563,7 +568,7 @@ namespace pRRTC {
                         interp_cfg[i] = config[i] + (int(tid/4 + 1) * (vec[i] / (float) d_settings.granularity));
                     }
                     __syncthreads();
-                    ppln::device_utils::fkcc_single_buffer<Robot>(interp_cfg, env, tid, sphere_pos, link_CC, T, local_cc_result);
+                    ppln::device_utils::fkcc_single_buffer<Robot>(interp_cfg, env, tid, sphere_pos, link_CC, T, local_cc_result, any_approx_env_collision, any_approx_self_collision);
                     bool ext_edge_good = local_cc_result[0] == 0;
                     if (!ext_edge_good) break;
                     if (tid == 0) {
@@ -573,6 +578,8 @@ namespace pRRTC {
                         radii[t_tree_id][index] = FLT_MAX;
                         extension_parent_idx = index;
                         local_cc_result[0] = 0;
+                        any_approx_env_collision[0] = 0;
+                        any_approx_self_collision[0] = 0;
                         // printf("config added (extension): %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f\n", config[0], config[1], config[2], config[3], config[4], config[5], config[6], config[7], config[8], config[9], config[10], config[11], config[12], config[13]);
                     }
                     __syncthreads();

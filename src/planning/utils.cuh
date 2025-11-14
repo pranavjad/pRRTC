@@ -636,7 +636,9 @@ namespace ppln::collision {
         volatile float *sphere_pos,
         volatile int *link_CC,
         float *T,
-        volatile unsigned int *cc_result
+        volatile unsigned int *cc_result,
+        volatile unsigned int *any_approx_env_collision,
+        volatile unsigned int *any_approx_self_collision
     ) {
         // reset link_CC
         for (int i = tid; i < 640; i += blockDim.x)
@@ -655,26 +657,52 @@ namespace ppln::collision {
         bool approx_self_collision =
             not ppln::collision::self_collision_check_approx<Robot>(sphere_pos, link_CC, tid);
         
-        bool any_approx_env_collision = warp_any_full_mask(approx_env_collision);
-        bool any_approx_self_collision = warp_any_full_mask(approx_self_collision);
-        bool approx_collision = any_approx_env_collision || any_approx_self_collision;
-        bool collision = false;
+        atomicOr((unsigned int *)any_approx_env_collision, approx_env_collision ? 1u : 0u);
+        atomicOr((unsigned int *)any_approx_self_collision, approx_self_collision ? 1u : 0u);
+        __syncthreads();
         // if any approx collision found, proceed to detailed FK and CC
-        if (approx_collision) {
+        if (any_approx_env_collision[0] || any_approx_self_collision[0]) {
+            // if (tid == 0) printf("any_approx_env_collision: %d, any_approx_self_collision: %d\n", any_approx_env_collision, any_approx_self_collision);
             ppln::collision::fk<Robot>(config, sphere_pos, T, tid);
             __syncthreads();
-            if (any_approx_env_collision) {
+            // if (tid == 0) {
+            //     // for (int b = 0; b < 16; b++) {
+            //     //     for (int i = 0; i < 111; i++) {
+            //     //         printf("sphere_pos %i, batch %d: %f %f %f\n", i, b, sphere_pos[i * 16 * 3 + b * 3 + 0], sphere_pos[i * 16 * 3 + b * 3 + 1], sphere_pos[i * 16 * 3 + b * 3 + 2]);
+            //     //     }
+            //     // }
+            //     // for (int i = 0; i < 16 * 111 * 3; i++) {
+            //     //     printf("sphere_pos[%i]=%f\n", i, sphere_pos[i]);
+            //     // }
+            //     printf("sphere_pos[24]=%f\n", sphere_pos[24]);
+            //     printf("sphere_pos[25]=%f\n", sphere_pos[25]);
+            //     printf("sphere_pos[26]=%f\n", sphere_pos[26]);
+            //     printf("T:\n");
+            //     for (int b = 0; b < 16; b++) {
+            //         printf("batch %d:\n", b);
+            //         for (int i = 0; i < 4; i++) {
+            //             for (int j = 0; j < 4; j++) {
+            //                 printf("%f ", T[b * 16 + i * 4 + j]);
+            //             }
+            //             printf("\n");
+            //         }
+            //         printf("\n");
+            //     }
+            // }
+            // __syncthreads();
+            if (any_approx_env_collision[0]) {
                 bool detailed_env_collision =
                     not ppln::collision::env_collision_check<Robot>(sphere_pos, link_CC, env, tid);
-                collision = warp_any_full_mask(detailed_env_collision);
+                atomicOr((unsigned int *)cc_result, detailed_env_collision ? 1u : 0u);
+                // if (tid == 0) printf("detailed_env_collision: %d\n", detailed_env_collision);
             }
-            if (!collision && any_approx_self_collision) {
+            if (!cc_result[0] && any_approx_self_collision[0]) {
                 bool detailed_self_collision =
                     not ppln::collision::self_collision_check<Robot>(sphere_pos, link_CC, tid);
-                collision = warp_any_full_mask(detailed_self_collision);
+                atomicOr((unsigned int *)cc_result, detailed_self_collision ? 1u : 0u);
+                // if (tid == 0) printf("detailed_self_collision: %d\n", detailed_self_collision);
             }
         }
-        atomicOr((unsigned int *)cc_result, collision ? 1u : 0u);
         __syncthreads();
     }
 

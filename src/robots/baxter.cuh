@@ -431,11 +431,12 @@ namespace ppln::collision {
             __syncwarp();
             int sphere_count = baxter_approx_joint_to_sphere_count[i];
             for (int s = transformed_sphere_ind + col_ind; s < transformed_sphere_ind + sphere_count; s += 4) {
+                int sphere_ind = baxter_approx_flattened_joint_to_spheres[s];
                 for (int c = 0; c < 3; c++) {
-                    sphere_pos_approx[s * BATCH_SIZE * 3 + batch_ind * 3 + c] = 
-                        T_base[T_memory_idx*16 + c] * baxter_approx_spheres_array[s].x +
-                        T_base[T_memory_idx*16 + c + M] * baxter_approx_spheres_array[s].y +
-                        T_base[T_memory_idx*16 + c + M*2] * baxter_approx_spheres_array[s].z +
+                    sphere_pos_approx[sphere_ind * BATCH_SIZE * 3 + batch_ind * 3 + c] = 
+                        T_base[T_memory_idx*16 + c] * baxter_approx_spheres_array[sphere_ind].x +
+                        T_base[T_memory_idx*16 + c + M] * baxter_approx_spheres_array[sphere_ind].y +
+                        T_base[T_memory_idx*16 + c + M*2] * baxter_approx_spheres_array[sphere_ind].z +
                         T_base[T_memory_idx*16 + c + M*3];
                 }
             }
@@ -484,7 +485,7 @@ namespace ppln::collision {
     
         for (int i = thread_ind; i < BAXTER_APPROX_SPHERE_COUNT; i += 4){
             // sphere i, robot batch_ind (32 robots)
-            if (i > 0 &&
+            if (
                 sphere_environment_in_collision(
                     env,
                     sphere_pos_approx[i * BATCH_SIZE * 3 + batch_ind * 3 + 0],
@@ -1097,11 +1098,12 @@ namespace ppln::collision {
             __syncwarp();
             int sphere_count = baxter_joint_to_sphere_count[i];
             for (int s = transformed_sphere_ind + col_ind; s < transformed_sphere_ind + sphere_count; s += 4) {
+                int sphere_ind = baxter_flattened_joint_to_spheres[s];
                 for (int c = 0; c < 3; c++) {
-                    sphere_pos[s * BATCH_SIZE * 3 + batch_ind * 3 + c] = 
-                        T_base[T_memory_idx*16 + c] * baxter_spheres_array[s].x +
-                        T_base[T_memory_idx*16 + c + M] * baxter_spheres_array[s].y +
-                        T_base[T_memory_idx*16 + c + M*2] * baxter_spheres_array[s].z +
+                    sphere_pos[sphere_ind * BATCH_SIZE * 3 + batch_ind * 3 + c] = 
+                        T_base[T_memory_idx*16 + c] * baxter_spheres_array[sphere_ind].x +
+                        T_base[T_memory_idx*16 + c + M] * baxter_spheres_array[sphere_ind].y +
+                        T_base[T_memory_idx*16 + c + M*2] * baxter_spheres_array[sphere_ind].z +
                         T_base[T_memory_idx*16 + c + M*3];
                 }
             }
@@ -1154,7 +1156,7 @@ namespace ppln::collision {
     
         for (int i = thread_ind; i < BAXTER_SPHERE_COUNT-BAXTER_SPHERE_COUNT%4; i += 4){
             // sphere i, robot batch_ind (16 robots)
-            if (i > 0 && (joint_in_collision[20*batch_ind + baxter_sphere_to_joint[i]] & 1) && 
+            if ( (joint_in_collision[20*batch_ind + baxter_sphere_to_joint[i]] & 1) && 
                 sphere_environment_in_collision(
                     env,
                     sphere_pos[i * BATCH_SIZE * 3 + batch_ind * 3 + 0],
@@ -1168,7 +1170,7 @@ namespace ppln::collision {
             if (warp_any_full_mask(has_collision)) return false;
         }
         int i=BAXTER_SPHERE_COUNT-1-thread_ind;
-        if (i > 0 && (joint_in_collision[20*batch_ind + baxter_sphere_to_joint[i]] & 1) && 
+        if ( (joint_in_collision[20*batch_ind + baxter_sphere_to_joint[i]] & 1) && 
             sphere_environment_in_collision(
                 env,
                 sphere_pos[i * BATCH_SIZE * 3 + batch_ind * 3 + 0],

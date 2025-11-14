@@ -219,7 +219,7 @@ namespace ppln::collision {
     };
     
     template <>
-    __device__ void fk_approx<ppln::robots::Fetch>(
+    __device__ __forceinline__ void fk_approx<ppln::robots::Fetch>(
         const float* q,
         volatile float* sphere_pos_approx, // 15 spheres x 16 robots x 3 coordinates (each column is a robot)
         float *T, // 16 robots x 1 x 4x4 transform matrix , column major
@@ -288,6 +288,10 @@ namespace ppln::collision {
                         T_base[T_memory_idx*16 + c + M] * fetch_approx_spheres_array[sphere_ind].y +
                         T_base[T_memory_idx*16 + c + M*2] * fetch_approx_spheres_array[sphere_ind].z +
                         T_base[T_memory_idx*16 + c + M*3];
+                    
+                    // if (sphere_ind * BATCH_SIZE * 3 + batch_ind * 3 + c == 24) {
+                    //     printf("Writing sphere_pos_approx[%d]=%f\n", sphere_ind * BATCH_SIZE * 3 + batch_ind * 3 + c, sphere_pos_approx[sphere_ind * BATCH_SIZE * 3 + batch_ind * 3 + c]);
+                    // }
                 }
             }
             transformed_sphere_ind += sphere_count;
@@ -297,7 +301,7 @@ namespace ppln::collision {
     
     // 4 threads per discretized motion for self-collision check
     template <>
-    __device__ bool self_collision_check_approx<ppln::robots::Fetch>(volatile float* sphere_pos_approx, volatile int* joint_in_collision, const int tid){
+    __device__ __forceinline__ bool self_collision_check_approx<ppln::robots::Fetch>(volatile float* sphere_pos_approx, volatile int* joint_in_collision, const int tid){
         const int thread_ind = tid % 4;
         const int batch_ind = tid / 4;
         bool out = true;
@@ -328,7 +332,7 @@ namespace ppln::collision {
     
     // 4 threads per discretized motion for env collision check
     template <>
-    __device__ bool env_collision_check_approx<ppln::robots::Fetch>(volatile float* sphere_pos_approx, volatile int* joint_in_collision, ppln::collision::Environment<float> *env, const int tid){
+    __device__ __forceinline__ bool env_collision_check_approx<ppln::robots::Fetch>(volatile float* sphere_pos_approx, volatile int* joint_in_collision, ppln::collision::Environment<float> *env, const int tid){
         const int thread_ind = tid % 4;
         const int batch_ind = tid / 4;
         bool out = true;
@@ -956,7 +960,7 @@ namespace ppln::collision {
     };
     
     template <>
-    __device__ void fk<ppln::robots::Fetch>(
+    __device__ __forceinline__ void fk<ppln::robots::Fetch>(
         const float* q,
         volatile float* sphere_pos, // 111 spheres x 16 robots x 3 coordinates (each column is a robot)
         float *T, // 16 robots x 1 x 4x4 transform matrix , column major
@@ -1025,6 +1029,18 @@ namespace ppln::collision {
                         T_base[T_memory_idx*16 + c + M] * fetch_spheres_array[sphere_ind].y +
                         T_base[T_memory_idx*16 + c + M*2] * fetch_spheres_array[sphere_ind].z +
                         T_base[T_memory_idx*16 + c + M*3];
+                    // if (batch_ind == 8) {
+                    //     printf(
+                    //         "sphere_pos[%d]=%f, calculated with T_base[%d, %d, %d, %d] and fetch_spheres_array[%d].x, y, z\n",
+                    //         sphere_ind * BATCH_SIZE * 3 + batch_ind * 3 + c,
+                    //         sphere_pos[sphere_ind * BATCH_SIZE * 3 + batch_ind * 3 + c],
+                    //         T_memory_idx*16 + c,
+                    //         T_memory_idx*16 + c + M,
+                    //         T_memory_idx*16 + c + M*2,
+                    //         T_memory_idx*16 + c + M*3,
+                    //         sphere_ind
+                    //     );
+                    // }
                 }
             }
             transformed_sphere_ind += sphere_count;
@@ -1034,7 +1050,7 @@ namespace ppln::collision {
     
     // 4 threads per discretized motion for self-collision check
     template <>
-    __device__ bool self_collision_check<ppln::robots::Fetch>(volatile float* sphere_pos, volatile int* joint_in_collision, const int tid){
+    __device__ __forceinline__ bool self_collision_check<ppln::robots::Fetch>(volatile float* sphere_pos, volatile int* joint_in_collision, const int tid){
         const int thread_ind = tid % 4;
         const int batch_ind = tid / 4;
         bool has_collision = false;
@@ -1042,7 +1058,7 @@ namespace ppln::collision {
         for (int i = thread_ind; i < FETCH_SELF_CC_RANGE_COUNT; i += 4) {
             if (warp_any_active_mask(has_collision)) return false;
             int sphere_1_ind = fetch_self_cc_ranges[i][0];
-            // if (!(joint_in_collision[20*batch_ind + fetch_sphere_to_joint[sphere_1_ind]] & 2)) continue;
+            if (!(joint_in_collision[20*batch_ind + fetch_sphere_to_joint[sphere_1_ind]] & 2)) continue;
             float sphere_1[3] = {
                 sphere_pos[sphere_1_ind * BATCH_SIZE * 3 + batch_ind * 3 + 0],
                 sphere_pos[sphere_1_ind * BATCH_SIZE * 3 + batch_ind * 3 + 1],
@@ -1069,14 +1085,14 @@ namespace ppln::collision {
     
     // 4 threads per discretized motion for env collision check
     template <>
-    __device__ bool env_collision_check<ppln::robots::Fetch>(volatile float* sphere_pos, volatile int* joint_in_collision, ppln::collision::Environment<float> *env, const int tid){
+    __device__ __forceinline__ bool env_collision_check<ppln::robots::Fetch>(volatile float* sphere_pos, volatile int* joint_in_collision, ppln::collision::Environment<float> *env, const int tid){
         const int thread_ind = tid % 4;
         const int batch_ind = tid / 4;
         bool has_collision=false;
     
         for (int i = thread_ind; i < FETCH_SPHERE_COUNT-FETCH_SPHERE_COUNT%4; i += 4){
             // sphere i, robot batch_ind (16 robots)
-            if ( 
+            if ( joint_in_collision[20*batch_ind + fetch_sphere_to_joint[i]] & 1 && 
                 sphere_environment_in_collision(
                     env,
                     sphere_pos[i * BATCH_SIZE * 3 + batch_ind * 3 + 0],
@@ -1090,7 +1106,7 @@ namespace ppln::collision {
             if (warp_any_full_mask(has_collision)) return false;
         }
         int i=FETCH_SPHERE_COUNT-1-thread_ind;
-        if ( 
+        if ( joint_in_collision[20*batch_ind + fetch_sphere_to_joint[i]] & 1 && 
             sphere_environment_in_collision(
                 env,
                 sphere_pos[i * BATCH_SIZE * 3 + batch_ind * 3 + 0],

@@ -121,9 +121,18 @@ int main(int argc, char* argv[]) {
     std::ifstream f(path);
     json all_data = json::parse(f);
     json problems = all_data["problems"];
+    std::vector<std::string> problem_names;
+    for (auto& [name, pset] : problems.items()) problem_names.push_back(name);
     auto pset = problems[name];
+    if (pset.empty()) {
+        std::cerr << "Problem " << name << " not found\n";
+        std::cout << "Available problems:\n";
+        for (auto& name : problem_names) std::cout << name << "\n";
+        return 1;
+    }
     json data = pset[problem_idx - 1];
     if (not data["valid"]) {
+        std::cerr << "Problem " << name << " is invalid\n";
         return -1;
     }
     auto env = problem_dict_to_env(data, name);
@@ -131,7 +140,7 @@ int main(int argc, char* argv[]) {
     settings.num_new_configs = 512; //usually:512
     settings.max_iters = 100000000;
     settings.granularity = 16;
-    settings.range = 0.5;
+    settings.range = 0.25;
     settings.balance = 2;
     settings.tree_ratio = 1.0;
     settings.dynamic_domain = true;
