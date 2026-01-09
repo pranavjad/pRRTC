@@ -29,6 +29,9 @@ namespace ppln::collision
         Cuboid<DataT> *z_aligned_cuboids;
         unsigned int num_z_aligned_cuboids;
 
+        float *pointcloud;
+        unsigned int num_points = 0;
+
         // HeightField<DataT> *heightfields;
         // unsigned int num_heightfields;
 
@@ -41,6 +44,7 @@ namespace ppln::collision
             delete[] z_aligned_capsules;
             delete[] cylinders;
             delete[] z_aligned_cuboids;
+            delete[] pointcloud;
         }
     };
 }  // namespace ppln::collision

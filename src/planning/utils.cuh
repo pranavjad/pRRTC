@@ -390,6 +390,20 @@ namespace ppln::device_utils {
         const float rsq = sr_ * sr_;
         bool in_collision = false;
 
+        if (env->num_points > 0) {
+            for (unsigned int i = 0; i < env->num_points && !in_collision; i++)
+            {
+                float dx = env->pointcloud[i * 3 + 0] - sx_;
+                float dy = env->pointcloud[i * 3 + 1] - sy_;
+                float dz = env->pointcloud[i * 3 + 2] - sz_;
+                float dist_sq = dx * dx + dy * dy + dz * dz;
+                if (dist_sq < rsq) {
+                    in_collision = true;
+                }
+            }
+            return in_collision;
+        }
+
         for (unsigned int i = 0; i < env->num_spheres && !in_collision; i++)
         {
             in_collision |= (sphere_sphere_sql2(env->spheres[i], sx_, sy_, sz_, sr_) < 0);

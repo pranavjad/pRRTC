@@ -68,7 +68,7 @@ add_executable(single_mbm
     src/planning/pRRTC.cu
 )
 
-target_compile_options(evaluate_mbm PRIVATE
+target_compile_options(single_mbm PRIVATE
     -w
     -mavx2 -mfma
 )
